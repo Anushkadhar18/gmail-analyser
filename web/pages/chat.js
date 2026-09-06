@@ -1,22 +1,98 @@
-import React, { useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { apiFetch } from '../lib/api'
+
+const PALETTE = {
+  bg: '#FAF9F5',
+  panel: '#FFFFFF',
+  border: '#E4DFD3',
+  borderStrong: '#1F2422',
+  text: '#1F2422',
+  muted: '#8A8478',
+  accent: '#1B4B43',
+  accentDark: '#123832',
+  userBubble: '#E8F1EE',
+  userText: '#153A34',
+  assistantBubble: '#F3F1EA',
+  danger: '#B5502D',
+  success: '#3F7A5C',
+}
+
+const SUGGESTIONS = [
+  'reply to the most recent email saying thanks, all good',
+  "schedule a sync with alice@example.com tomorrow at 3pm",
+  'what can you help me with?',
+]
+
+function SendIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+      <path d="M1.5 8L14.5 1.5L9.5 14.5L7 8.5L1.5 8Z" stroke="white" strokeWidth="1.4" strokeLinejoin="round" strokeLinecap="round" fill="none" />
+    </svg>
+  )
+}
+
+function SparkIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="white">
+      <path d="M8 0L9.4 6.6L16 8L9.4 9.4L8 16L6.6 9.4L0 8L6.6 6.6L8 0Z" />
+    </svg>
+  )
+}
+
+function TypingDots() {
+  return (
+    <span style={{ display: 'inline-flex', gap: 3, alignItems: 'center', height: 14 }}>
+      <span className="dot" style={{ animationDelay: '0ms' }} />
+      <span className="dot" style={{ animationDelay: '150ms' }} />
+      <span className="dot" style={{ animationDelay: '300ms' }} />
+      <style jsx>{`
+        .dot {
+          width: 5px;
+          height: 5px;
+          border-radius: 50%;
+          background: ${PALETTE.muted};
+          animation: bounce 1.1s infinite ease-in-out;
+        }
+        @keyframes bounce {
+          0%, 80%, 100% { transform: translateY(0); opacity: 0.4; }
+          40% { transform: translateY(-4px); opacity: 1; }
+        }
+      `}</style>
+    </span>
+  )
+}
 
 export default function ChatPage() {
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
+  const textareaRef = useRef(null)
+  const scrollRef = useRef(null)
 
-  const send = async () => {
-    const text = input.trim()
+  useEffect(() => {
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto'
+      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 140)}px`
+    }
+  }, [input])
+
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight
+    }
+  }, [messages, sending])
+
+  const send = async (overrideText) => {
+    const text = (overrideText ?? input).trim()
     if (!text || sending) return
     setInput('')
-    setMessages((m) => [...m, { role: 'user', text }])
+    setMessages((m) => [...m, { role: 'user', text, at: Date.now() }])
     setSending(true)
     try {
       const res = await apiFetch('/api/chat/message', { method: 'POST', body: JSON.stringify({ message: text }) })
-      setMessages((m) => [...m, { role: 'assistant', text: res.reply_text, intent: res.intent, proposedEvent: res.proposed_event, draftId: res.draft_id }])
+      setMessages((m) => [...m, { role: 'assistant', text: res.reply_text, intent: res.intent, proposedEvent: res.proposed_event, draftId: res.draft_id, at: Date.now() }])
     } catch (e) {
-      setMessages((m) => [...m, { role: 'assistant', text: `Error: ${e.message}` }])
+      setMessages((m) => [...m, { role: 'assistant', text: `Something went wrong: ${e.message}`, isError: true, at: Date.now() }])
     } finally {
       setSending(false)
     }
@@ -27,7 +103,7 @@ export default function ChatPage() {
       await apiFetch('/mcp/calendar/create_event', { method: 'POST', body: JSON.stringify({ event, approve: true }) })
       setMessages((m) => m.map((msg, i) => (i === index ? { ...msg, scheduled: true } : msg)))
     } catch (e) {
-      setMessages((m) => [...m, { role: 'assistant', text: `Failed to schedule: ${e.message}` }])
+      setMessages((m) => [...m, { role: 'assistant', text: `Failed to schedule: ${e.message}`, isError: true, at: Date.now() }])
     }
   }
 
@@ -39,59 +115,231 @@ export default function ChatPage() {
   }
 
   return (
-    <div style={{ padding: 24, maxWidth: 640 }}>
-      <h2>Chat</h2>
-      <p style={{ color: '#666' }}>
-        Ask it to draft a reply (e.g. "reply saying I'll be there") or propose a meeting
-        (e.g. "schedule a sync with alice@example.com tomorrow at 3pm").
-      </p>
+    <div style={{ minHeight: '100vh', background: PALETTE.bg, padding: '40px 24px', fontFamily: 'var(--font-body)', color: PALETTE.text }}>
+      <div style={{ maxWidth: 680, margin: '0 auto' }}>
+        <div style={{ marginBottom: 20 }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
+            <h1 style={{ fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 30, margin: 0, letterSpacing: '-0.01em' }}>Assistant</h1>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 12, color: PALETTE.success, fontWeight: 600 }}>
+              <span style={{ width: 6, height: 6, borderRadius: '50%', background: PALETTE.success, display: 'inline-block' }} />
+              online
+            </span>
+          </div>
+          <p style={{ color: PALETTE.muted, fontSize: 14, marginTop: 4, lineHeight: 1.5 }}>
+            Drafts replies and proposes meetings from your Gmail and Calendar. Nothing sends without your review.
+          </p>
+        </div>
 
-      <div style={{ fontSize: 12, fontWeight: 'bold', color: '#888', textTransform: 'uppercase', marginBottom: 4 }}>
-        Conversation (not editable)
-      </div>
-      <div style={{ background: '#fafafa', border: '1px solid #eee', borderRadius: 6, padding: 12, minHeight: 240, marginBottom: 16 }}>
-        {messages.length === 0 && <p style={{ color: '#999', fontStyle: 'italic' }}>Nothing sent yet — type below and press Send.</p>}
-        {messages.map((m, i) => (
-          <div key={i} style={{ marginBottom: 12, textAlign: m.role === 'user' ? 'right' : 'left' }}>
-            <div
-              style={{
-                display: 'inline-block',
-                background: m.role === 'user' ? '#e6f0ff' : '#f2f2f2',
-                borderRadius: 6,
-                padding: '8px 12px',
-                maxWidth: '90%',
-                whiteSpace: 'pre-wrap',
-                textAlign: 'left',
-              }}
-            >
-              {m.text}
-            </div>
-            {m.intent === 'schedule' && m.proposedEvent && !m.scheduled && (
-              <div style={{ marginTop: 6 }}>
-                <button onClick={() => confirmSchedule(m.proposedEvent, i)}>Confirm &amp; Schedule</button>
+        <div
+          style={{
+            background: PALETTE.panel,
+            border: `1px solid ${PALETTE.border}`,
+            borderRadius: 16,
+            overflow: 'hidden',
+            boxShadow: '0 1px 2px rgba(31,36,34,0.04), 0 8px 24px rgba(31,36,34,0.05)',
+          }}
+        >
+          <div ref={scrollRef} style={{ height: 420, overflowY: 'auto', padding: '20px 20px 8px' }}>
+            {messages.length === 0 && (
+              <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16 }}>
+                <div
+                  style={{
+                    width: 40,
+                    height: 40,
+                    borderRadius: 12,
+                    background: PALETTE.accent,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <SparkIcon />
+                </div>
+                <p style={{ color: PALETTE.muted, fontSize: 14, textAlign: 'center', maxWidth: 320, margin: 0 }}>
+                  Try one of these, or write your own below.
+                </p>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%', maxWidth: 420 }}>
+                  {SUGGESTIONS.map((s) => (
+                    <button
+                      key={s}
+                      onClick={() => setInput(s)}
+                      className="suggestion"
+                      style={{
+                        textAlign: 'left',
+                        background: PALETTE.bg,
+                        border: `1px solid ${PALETTE.border}`,
+                        borderRadius: 10,
+                        padding: '10px 14px',
+                        fontSize: 13.5,
+                        color: PALETTE.text,
+                        cursor: 'pointer',
+                        fontFamily: 'var(--font-body)',
+                      }}
+                    >
+                      {s}
+                    </button>
+                  ))}
+                </div>
               </div>
             )}
-            {m.scheduled && <p style={{ color: 'green', margin: '4px 0 0' }}>Scheduled.</p>}
+
+            {messages.map((m, i) => (
+              <div key={i} style={{ display: 'flex', gap: 10, marginBottom: 16, flexDirection: m.role === 'user' ? 'row-reverse' : 'row' }}>
+                <div
+                  style={{
+                    flexShrink: 0,
+                    width: 26,
+                    height: 26,
+                    borderRadius: 8,
+                    background: m.role === 'user' ? PALETTE.borderStrong : PALETTE.accent,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    marginTop: 2,
+                  }}
+                >
+                  {m.role === 'user' ? (
+                    <span style={{ color: 'white', fontSize: 11, fontWeight: 700 }}>You</span>
+                  ) : (
+                    <SparkIcon />
+                  )}
+                </div>
+                <div style={{ maxWidth: '78%', display: 'flex', flexDirection: 'column', alignItems: m.role === 'user' ? 'flex-end' : 'flex-start' }}>
+                  <div
+                    style={{
+                      background: m.isError ? '#FBEDE7' : m.role === 'user' ? PALETTE.userBubble : PALETTE.assistantBubble,
+                      color: m.isError ? PALETTE.danger : m.role === 'user' ? PALETTE.userText : PALETTE.text,
+                      borderRadius: 14,
+                      borderTopRightRadius: m.role === 'user' ? 4 : 14,
+                      borderTopLeftRadius: m.role === 'user' ? 14 : 4,
+                      padding: '10px 14px',
+                      fontSize: 14.5,
+                      lineHeight: 1.5,
+                      whiteSpace: 'pre-wrap',
+                    }}
+                  >
+                    {m.text}
+                  </div>
+
+                  {m.intent === 'schedule' && m.proposedEvent && !m.scheduled && (
+                    <div
+                      style={{
+                        marginTop: 8,
+                        border: `1px solid ${PALETTE.border}`,
+                        borderRadius: 12,
+                        padding: 12,
+                        width: '100%',
+                        background: PALETTE.bg,
+                      }}
+                    >
+                      <div style={{ fontSize: 12, fontWeight: 700, color: PALETTE.muted, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 6 }}>
+                        Proposed event
+                      </div>
+                      <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 2 }}>{m.proposedEvent.summary}</div>
+                      <div style={{ fontSize: 13, color: PALETTE.muted, marginBottom: 10 }}>
+                        {m.proposedEvent.start?.dateTime} → {m.proposedEvent.end?.dateTime}
+                      </div>
+                      <button
+                        onClick={() => confirmSchedule(m.proposedEvent, i)}
+                        className="cta"
+                        style={{
+                          background: PALETTE.accent,
+                          color: 'white',
+                          border: 'none',
+                          borderRadius: 8,
+                          padding: '8px 14px',
+                          fontSize: 13,
+                          fontWeight: 600,
+                          cursor: 'pointer',
+                          fontFamily: 'var(--font-body)',
+                        }}
+                      >
+                        Confirm &amp; schedule
+                      </button>
+                    </div>
+                  )}
+                  {m.scheduled && (
+                    <p style={{ color: PALETTE.success, fontSize: 12.5, fontWeight: 600, margin: '6px 0 0' }}>✓ Added to your calendar</p>
+                  )}
+                </div>
+              </div>
+            ))}
+
+            {sending && (
+              <div style={{ display: 'flex', gap: 10, marginBottom: 16 }}>
+                <div style={{ flexShrink: 0, width: 26, height: 26, borderRadius: 8, background: PALETTE.accent, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <SparkIcon />
+                </div>
+                <div style={{ background: PALETTE.assistantBubble, borderRadius: 14, borderTopLeftRadius: 4, padding: '12px 14px' }}>
+                  <TypingDots />
+                </div>
+              </div>
+            )}
           </div>
-        ))}
+
+          <div style={{ borderTop: `1px solid ${PALETTE.border}`, padding: 12, display: 'flex', gap: 8, alignItems: 'flex-end', background: PALETTE.panel }}>
+            <textarea
+              ref={textareaRef}
+              autoFocus
+              rows={1}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={onKeyDown}
+              placeholder="Type a message — Enter to send, Shift+Enter for a new line"
+              style={{
+                flex: 1,
+                resize: 'none',
+                padding: '10px 14px',
+                fontSize: 14.5,
+                fontFamily: 'var(--font-body)',
+                color: PALETTE.text,
+                border: `1.5px solid ${PALETTE.border}`,
+                borderRadius: 10,
+                outline: 'none',
+                lineHeight: 1.4,
+                maxHeight: 140,
+              }}
+              className="composer"
+            />
+            <button
+              onClick={() => send()}
+              disabled={sending || !input.trim()}
+              className="send-btn"
+              style={{
+                width: 38,
+                height: 38,
+                borderRadius: 10,
+                border: 'none',
+                background: sending || !input.trim() ? PALETTE.border : PALETTE.accent,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: sending || !input.trim() ? 'default' : 'pointer',
+                flexShrink: 0,
+              }}
+              aria-label="Send message"
+            >
+              <SendIcon />
+            </button>
+          </div>
+        </div>
       </div>
 
-      <label style={{ display: 'block', fontSize: 12, fontWeight: 'bold', color: '#888', textTransform: 'uppercase', marginBottom: 4 }}>
-        Type your message here
-      </label>
-      <div style={{ display: 'flex', gap: 8 }}>
-        <input
-          autoFocus
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={onKeyDown}
-          placeholder="e.g. reply to the most recent email saying thanks"
-          style={{ flex: 1, padding: '10px 12px', fontSize: 15, border: '2px solid #333', borderRadius: 6 }}
-        />
-        <button onClick={send} disabled={sending} style={{ padding: '10px 20px', fontSize: 15 }}>
-          {sending ? 'Sending...' : 'Send'}
-        </button>
-      </div>
+      <style jsx>{`
+        .suggestion:hover {
+          border-color: ${PALETTE.accent} !important;
+          background: ${PALETTE.userBubble} !important;
+        }
+        .composer:focus {
+          border-color: ${PALETTE.accent} !important;
+        }
+        .cta:hover {
+          background: ${PALETTE.accentDark} !important;
+        }
+        .send-btn:not(:disabled):hover {
+          background: ${PALETTE.accentDark} !important;
+        }
+      `}</style>
     </div>
   )
 }
