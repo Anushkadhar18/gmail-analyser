@@ -5,6 +5,7 @@ from services.backend.app.auth.session import get_current_user_id
 from services.backend.app.services.gmail import GmailService
 from services.backend.app.ai.llm import generate_draft_from_context
 from services.backend.app.services.email_filters import is_likely_automated
+from services.backend.app.services.email_builder import build_raw_message
 from services.backend.app.db import SessionLocal
 from services.backend.app import models
 from services.worker.tasks import send_draft_task
@@ -37,16 +38,24 @@ def generate_draft(req: GenerateDraftRequest, user_id: int = Depends(get_current
     svc = GmailService(creds)
     context_parts = []
     thread_id = req.thread_id
+    from_addr = None
+    in_reply_to = None
     if thread_id:
         thread = svc.get_thread(thread_id)
         for msg in thread.get("messages", []):
             snippet = msg.get("snippet")
             if snippet:
                 context_parts.append(snippet)
+        if thread.get("messages"):
+            last = thread["messages"][-1]
+            from_addr = last.get("from")
+            in_reply_to = (last.get("headers") or {}).get("message-id")
     elif req.message_id:
         msg = svc.get_email(req.message_id)
         if msg.get("snippet"):
             context_parts.append(msg.get("snippet"))
+        from_addr = msg.get("from")
+        in_reply_to = (msg.get("headers") or {}).get("message-id")
 
     context = "\n\n".join(context_parts)
     body = generate_draft_from_context(req.subject, context)
@@ -60,6 +69,16 @@ def generate_draft(req: GenerateDraftRequest, user_id: int = Depends(get_current
         db.add(models.AuditLog(user_id=user_id, action="draft_created", meta=str({"draft_id": draft.id})))
         db.commit()
         db.refresh(draft)
+
+        # Best-effort: also create a real Gmail draft (source of truth for
+        # approve/send stays this app's own Draft row either way).
+        if from_addr:
+            try:
+                raw = build_raw_message(from_addr, req.subject, body, in_reply_to=in_reply_to)
+                svc.create_draft(raw, thread_id=thread_id)
+            except Exception:
+                pass
+
         return {"draft_id": draft.id, "body": draft.body}
     finally:
         db.close()
@@ -113,10 +132,11 @@ def batch_generate_drafts(req: BatchGenerateRequest, user_id: int = Depends(get_
                 continue
 
             body = generate_draft_from_context(subject, context)
+            draft_subject = f"Re: {subject}" if subject else None
             draft = models.Draft(
                 user_id=user_id,
                 thread_id=thread_id,
-                subject=f"Re: {subject}" if subject else None,
+                subject=draft_subject,
                 body=body,
                 status="pending",
             )
@@ -129,6 +149,14 @@ def batch_generate_drafts(req: BatchGenerateRequest, user_id: int = Depends(get_
             ))
             existing_thread_ids.add(thread_id)
             created.append({"id": draft.id, "subject": subject, "from": from_addr})
+
+            # Best-effort: also create a real Gmail draft.
+            try:
+                in_reply_to = headers.get("message-id")
+                raw = build_raw_message(from_addr, draft_subject, body, in_reply_to=in_reply_to)
+                svc.create_draft(raw, thread_id=thread_id)
+            except Exception:
+                pass
 
         db.commit()
         return {"created": created, "skipped": skipped}

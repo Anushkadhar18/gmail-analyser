@@ -42,6 +42,7 @@ def fetch_emails_task(user_id: int, query: str = "newer_than:2d"):
     from services.backend.app.auth.token_store import get_credentials_for_user
     from services.backend.app.services.gmail import GmailService
     from services.backend.app.services.email_filters import is_likely_automated
+    from services.backend.app.services.email_builder import build_raw_message
     from services.backend.app.ai.task_extractor import extract_tasks_from_text
     from services.backend.app.ai.llm import generate_draft_from_context
     from services.backend.app.db import SessionLocal
@@ -118,15 +119,24 @@ def fetch_emails_task(user_id: int, query: str = "newer_than:2d"):
                 context = msg.get("text") or msg.get("snippet") or ""
                 if not is_likely_automated(from_addr, headers) and context.strip():
                     body = generate_draft_from_context(subject, context)
+                    draft_subject = f"Re: {subject}" if subject else None
                     db.add(models.Draft(
                         user_id=user_id,
                         thread_id=thread_id,
-                        subject=f"Re: {subject}" if subject else None,
+                        subject=draft_subject,
                         body=body,
                         status="pending",
                     ))
                     existing_draft_thread_ids.add(thread_id)
                     drafted += 1
+
+                    # Best-effort: also create a real Gmail draft.
+                    try:
+                        in_reply_to = headers.get("message-id")
+                        raw = build_raw_message(from_addr, draft_subject, body, in_reply_to=in_reply_to)
+                        svc.create_draft(raw, thread_id=thread_id)
+                    except Exception as e:
+                        print(f"Failed to create Gmail draft for thread {thread_id}: {e}")
         db.add(models.AuditLog(
             user_id=user_id,
             action="emails_synced",
@@ -183,9 +193,8 @@ def send_draft_task(draft_id: int):
     from services.backend.app.db import SessionLocal
     from services.backend.app import models
     from services.backend.app.services.gmail import GmailService
+    from services.backend.app.services.email_builder import build_raw_message
     from services.backend.app.auth.token_store import get_credentials_for_user
-    import base64
-    from email.message import EmailMessage
     from datetime import datetime
 
     db = SessionLocal()
@@ -208,7 +217,6 @@ def send_draft_task(draft_id: int):
 
         to_addr = ""
         in_reply_to = None
-        references = None
         if draft.thread_id:
             try:
                 thread = svc.get_thread(draft.thread_id)
@@ -217,20 +225,10 @@ def send_draft_task(draft_id: int):
                     last = messages[-1]
                     to_addr = last.get("from") or (last.get("headers") or {}).get("from") or ""
                     in_reply_to = (last.get("headers") or {}).get("message-id")
-                    references = in_reply_to
             except Exception:
                 to_addr = ""
 
-        msg = EmailMessage()
-        msg["To"] = to_addr
-        msg["Subject"] = draft.subject or ""
-        if in_reply_to:
-            msg["In-Reply-To"] = in_reply_to
-        if references:
-            msg["References"] = references
-        msg.set_content(draft.body)
-        raw_bytes = msg.as_bytes()
-        raw_b64 = base64.urlsafe_b64encode(raw_bytes).decode()
+        raw_b64 = build_raw_message(to_addr, draft.subject, draft.body, in_reply_to=in_reply_to)
 
         try:
             sent = svc.send_message(raw_b64, allow_send=True)

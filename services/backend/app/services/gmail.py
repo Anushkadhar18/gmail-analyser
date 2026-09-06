@@ -33,10 +33,12 @@ class GmailService:
         except Exception:
             return thread
 
-    def create_draft(self, raw_message: str) -> dict:
+    def create_draft(self, raw_message: str, thread_id: str | None = None) -> dict:
         # raw_message must be base64url-encoded RFC2822 message
-        body = {"message": {"raw": raw_message}}
-        draft = self.service.users().drafts().create(userId="me", body=body).execute()
+        message_body = {"raw": raw_message}
+        if thread_id:
+            message_body["threadId"] = thread_id
+        draft = self.service.users().drafts().create(userId="me", body={"message": message_body}).execute()
         return draft
 
     def send_message(self, raw_message: str, allow_send: bool = False) -> dict:

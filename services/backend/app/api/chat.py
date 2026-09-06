@@ -6,6 +6,7 @@ from services.backend.app.ai.chat import interpret_message
 from services.backend.app.ai.llm import generate_draft_from_context
 from services.backend.app.services.gmail import GmailService
 from services.backend.app.services.email_filters import is_likely_automated
+from services.backend.app.services.email_builder import build_raw_message
 from services.backend.app.db import SessionLocal
 from services.backend.app import models
 
@@ -32,6 +33,7 @@ def send_chat_message(req: ChatMessageRequest, user_id: int = Depends(get_curren
         thread_id = None
         subject = result.get("subject")
         from_addr = None
+        in_reply_to = None
         body = result.get("body", "")
 
         # If the request refers to a specific recent message ("reply to the
@@ -55,6 +57,7 @@ def send_chat_message(req: ChatMessageRequest, user_id: int = Depends(get_curren
                 }
 
             thread_id = msg.get("threadId")
+            in_reply_to = headers.get("message-id")
             db_check = SessionLocal()
             try:
                 existing = db_check.query(models.Draft).filter(
@@ -72,12 +75,13 @@ def send_chat_message(req: ChatMessageRequest, user_id: int = Depends(get_curren
             context = msg.get("text") or msg.get("snippet") or ""
             body = generate_draft_from_context(subject, context)
 
+        draft_subject = f"Re: {subject}" if subject and thread_id else subject
         db = SessionLocal()
         try:
             draft = models.Draft(
                 user_id=user_id,
                 thread_id=thread_id,
-                subject=(f"Re: {subject}" if subject and thread_id else subject),
+                subject=draft_subject,
                 body=body,
                 status="pending",
             )
@@ -86,9 +90,25 @@ def send_chat_message(req: ChatMessageRequest, user_id: int = Depends(get_curren
             db.add(models.AuditLog(user_id=user_id, action="draft_created", meta=str({"draft_id": draft.id, "source": "chat"})))
             db.commit()
             db.refresh(draft)
+
+            # Best-effort: also create a real Gmail draft so it shows up in
+            # the user's actual Drafts folder, not just this app's own list.
+            # This app's Draft row remains the source of truth for
+            # approve/send either way, so a failure here doesn't block that.
+            gmail_draft_created = False
+            if from_addr:
+                try:
+                    raw = build_raw_message(from_addr, draft_subject, body, in_reply_to=in_reply_to)
+                    svc.create_draft(raw, thread_id=thread_id)
+                    gmail_draft_created = True
+                except Exception:
+                    pass
+
             reply_text = f"I've drafted a reply (draft #{draft.id})"
             reply_text += f" to \"{subject}\" from {from_addr}" if from_addr else ""
             reply_text += ". Review and approve it on the Drafts page before it sends."
+            if from_addr and not gmail_draft_created:
+                reply_text += " (Note: couldn't also save it as a real Gmail draft — it still exists here.)"
             return {
                 "intent": "reply",
                 "reply_text": reply_text,
