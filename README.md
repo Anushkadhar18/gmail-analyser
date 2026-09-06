@@ -16,6 +16,13 @@ and generates meeting briefs. A Next.js frontend provides a minimal UI.
   approvals, meetings).
 - `infra/docker` — Docker Compose for local dev (Postgres, Redis, backend,
   worker, web).
+- `backend/` — a separate, standalone script (`main.py`), unrelated to
+  `services/backend`. A minimal FastAPI app with a single
+  `gmail.readonly`-scoped OAuth flow (`InstalledAppFlow`, credentials cached
+  in a local `token.json`) and one endpoint, `GET /gmail/messages`, that
+  returns the 10 most recent messages. No session auth, no database, no
+  write scopes — useful for a quick "can I read this account's Gmail at all"
+  check without standing up the full stack.
 
 ## Setup
 
@@ -53,6 +60,26 @@ and generates meeting briefs. A Next.js frontend provides a minimal UI.
    OAuth flow. This sets a session cookie tied to your account — every
    subsequent request infers the user from that cookie rather than trusting a
    client-supplied `user_id`.
+
+## Standalone Gmail test script (`backend/`)
+
+Independent of everything above — no Docker, no Postgres/Redis, no session
+auth. Useful for a quick sanity check that OAuth + the Gmail API work at all
+for a given account.
+
+1. In [Google Cloud Console](https://console.cloud.google.com/), create an
+   OAuth client of type **Desktop app**, download it, and save it as
+   `backend/client_secret.json` (gitignored — never commit this file).
+2. From `backend/`:
+   ```bash
+   pip install -r requirements.txt
+   uvicorn main:app --reload --port 8010
+   ```
+3. `GET http://localhost:8010/auth/google` — opens a local browser window to
+   complete consent; caches credentials in `backend/token.json` (also
+   gitignored).
+4. `GET http://localhost:8010/gmail/messages` — returns the 10 most recent
+   messages (sender, subject, date, body, thread ID) as JSON.
 
 ## Running tests
 
