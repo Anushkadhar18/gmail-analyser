@@ -10,7 +10,9 @@ export async function apiFetch(path, options = {}) {
     },
   })
   if (res.status === 401) {
-    if (typeof window !== 'undefined') window.location.href = '/'
+    if (typeof window !== 'undefined' && window.location.pathname !== '/') {
+      window.location.href = '/'
+    }
     throw new Error('not authenticated')
   }
   if (!res.ok) {
