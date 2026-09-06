@@ -33,7 +33,8 @@ and generates meeting briefs. A Next.js frontend provides a minimal UI.
    - `TOKEN_ENCRYPTION_KEY` — generate with:
      `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`
    - `SECRET_KEY` — any random string; used to sign session cookies.
-   - `OPENAI_API_KEY` — optional. Without it, draft/task/brief generation
+   - `GROQ_API_KEY` — optional, free tier at https://console.groq.com/keys.
+     Without it (or if it fails for any reason), draft/task/brief generation
      falls back to simple templates/heuristics instead of LLM calls.
 
 2. Copy `web/.env.local.example` to `web/.env.local` (defaults are fine for
@@ -82,10 +83,12 @@ and generates meeting briefs. A Next.js frontend provides a minimal UI.
   is sent without going through the existing `/api/drafts/approve` →
   `/api/drafts/send` flow.
 - All LLM calls (`app/ai/llm.py`, `task_extractor.py`, `meeting_brief.py`,
-  `chat.py`) fall back to a template/heuristic if `OPENAI_API_KEY` is unset
-  **or** if the call fails for any reason (invalid key, network error,
-  malformed response) — a bad key degrades draft quality, it doesn't crash
-  the request.
+  `chat.py`) go through Groq's OpenAI-compatible API
+  (`https://api.groq.com/openai/v1/chat/completions`, model
+  `llama-3.3-70b-versatile`) and fall back to a template/heuristic if
+  `GROQ_API_KEY` is unset **or** if the call fails for any reason (invalid
+  key, network error, malformed response) — a bad key degrades draft
+  quality, it doesn't crash the request.
 
 ## Standalone Gmail test script (`backend/`)
 

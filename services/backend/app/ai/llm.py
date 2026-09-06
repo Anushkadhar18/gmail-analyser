@@ -2,7 +2,7 @@ import os
 import requests
 import json
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
 
 def _fallback_template() -> str:
@@ -12,19 +12,19 @@ def _fallback_template() -> str:
 def generate_draft_from_context(subject: str | None, context: str) -> str:
     """Generate a draft body using an LLM. Falls back to a simple template if no
     key is provided, or if the LLM call fails for any reason (invalid key,
-    network error, malformed response) so a bad OPENAI_API_KEY degrades
+    network error, malformed response) so a bad GROQ_API_KEY degrades
     gracefully instead of crashing the caller.
     """
-    if OPENAI_API_KEY:
+    if GROQ_API_KEY:
         try:
-            url = "https://api.openai.com/v1/chat/completions"
-            headers = {"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"}
+            url = "https://api.groq.com/openai/v1/chat/completions"
+            headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
             system = "You are an assistant that drafts professional email replies. Keep it concise and include a suggested subject if missing."
             prompt = f"Context:\n{context}\n\nDraft a polite reply email."
             if subject:
                 prompt = f"Subject: {subject}\n\n" + prompt
             data = {
-                "model": "gpt-4o-mini",
+                "model": "llama-3.3-70b-versatile",
                 "messages": [{"role": "system", "content": system}, {"role": "user", "content": prompt}],
                 "max_tokens": 512,
             }

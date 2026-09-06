@@ -4,7 +4,7 @@ import json
 from datetime import datetime, timedelta, timezone
 from typing import Dict
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
 
 def _llm_interpret(message: str) -> Dict | None:
@@ -13,12 +13,12 @@ def _llm_interpret(message: str) -> Dict | None:
     interpret_message's `or _heuristic_interpret(...)` fallback always
     applies instead of a bad key crashing the endpoint.
     """
-    if not OPENAI_API_KEY:
+    if not GROQ_API_KEY:
         return None
     import requests
 
-    url = "https://api.openai.com/v1/chat/completions"
-    headers = {"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"}
+    url = "https://api.groq.com/openai/v1/chat/completions"
+    headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
     now = datetime.now(timezone.utc).isoformat()
     system = (
         "You are the intent router for a Gmail/Calendar assistant chat interface. "
@@ -32,7 +32,7 @@ def _llm_interpret(message: str) -> Dict | None:
         "Return only the JSON object, nothing else."
     )
     data = {
-        "model": "gpt-4o-mini",
+        "model": "llama-3.3-70b-versatile",
         "messages": [{"role": "system", "content": system}, {"role": "user", "content": message}],
         "max_tokens": 400,
     }
@@ -49,7 +49,7 @@ def _llm_interpret(message: str) -> Dict | None:
 
 
 def _heuristic_interpret(message: str) -> Dict:
-    """Best-effort keyword fallback used when OPENAI_API_KEY isn't set. Mirrors
+    """Best-effort keyword fallback used when GROQ_API_KEY isn't set. Mirrors
     the fallback pattern in task_extractor.py / llm.py: no real NLU, just
     enough to keep the chat usable without an LLM key.
     """

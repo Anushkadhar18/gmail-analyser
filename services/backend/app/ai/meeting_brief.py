@@ -5,7 +5,7 @@ from typing import Tuple
 from jsonschema import validate, ValidationError
 from services.backend.app.ai.schemas import meeting_brief_schema
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
 
 def _extract_json_from_text(text: str) -> dict | None:
@@ -54,11 +54,11 @@ def generate_meeting_brief(event: dict, related_emails: list[dict] | None = None
         "Only output the JSON (no explanation). If you include explanatory text, still include the JSON object so it can be parsed."
     )
 
-    if OPENAI_API_KEY:
-        url = "https://api.openai.com/v1/chat/completions"
-        headers = {"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"}
+    if GROQ_API_KEY:
+        url = "https://api.groq.com/openai/v1/chat/completions"
+        headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
         data = {
-            "model": "gpt-4o-mini",
+            "model": "llama-3.3-70b-versatile",
             "messages": [
                 {"role": "system", "content": system},
                 {"role": "user", "content": prompt_context},

@@ -3,17 +3,17 @@ import requests
 import json
 from typing import List, Dict
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
 
 def _llm_extract_tasks(text: str) -> List[Dict]:
-    if not OPENAI_API_KEY:
+    if not GROQ_API_KEY:
         return []
-    url = "https://api.openai.com/v1/chat/completions"
-    headers = {"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"}
+    url = "https://api.groq.com/openai/v1/chat/completions"
+    headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
     system = "You are an assistant that extracts actionable tasks from email content. For each task return a JSON object with fields: description, due_date (ISO or null), action_required (short label). Return only JSON array."
     prompt = f"Email content:\n{text}\n\nExtract tasks as JSON array."
-    data = {"model": "gpt-4o-mini", "messages": [{"role": "system", "content": system}, {"role": "user", "content": prompt}], "max_tokens": 512}
+    data = {"model": "llama-3.3-70b-versatile", "messages": [{"role": "system", "content": system}, {"role": "user", "content": prompt}], "max_tokens": 512}
     try:
         resp = requests.post(url, headers=headers, data=json.dumps(data), timeout=15)
         resp.raise_for_status()
