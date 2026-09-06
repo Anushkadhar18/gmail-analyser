@@ -8,6 +8,11 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 
 def _llm_interpret(message: str) -> Dict | None:
+    """Returns None (not a raised exception) whenever the LLM path can't be
+    used — missing key, request failure, or unparseable response — so
+    interpret_message's `or _heuristic_interpret(...)` fallback always
+    applies instead of a bad key crashing the endpoint.
+    """
     if not OPENAI_API_KEY:
         return None
     import requests
@@ -31,10 +36,10 @@ def _llm_interpret(message: str) -> Dict | None:
         "messages": [{"role": "system", "content": system}, {"role": "user", "content": message}],
         "max_tokens": 400,
     }
-    resp = requests.post(url, headers=headers, data=json.dumps(data), timeout=15)
-    resp.raise_for_status()
-    content = resp.json()["choices"][0]["message"]["content"]
     try:
+        resp = requests.post(url, headers=headers, data=json.dumps(data), timeout=15)
+        resp.raise_for_status()
+        content = resp.json()["choices"][0]["message"]["content"]
         parsed = json.loads(content)
         if isinstance(parsed, dict) and parsed.get("intent") in ("reply", "schedule", "chat"):
             return parsed

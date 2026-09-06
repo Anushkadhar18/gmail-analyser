@@ -12,7 +12,7 @@ and generates meeting briefs. A Next.js frontend provides a minimal UI.
 - `services/worker` — Celery worker + beat. Runs periodic Gmail sync (every 5
   min) and token refresh (every 30 min), plus on-demand tasks (draft sending,
   meeting brief generation).
-- `web` — Next.js frontend (pages: connect, drafts, extract, tasks,
+- `web` — Next.js frontend (pages: connect, chat, drafts, extract, tasks,
   approvals, meetings).
 - `infra/docker` — Docker Compose for local dev (Postgres, Redis, backend,
   worker, web).
@@ -60,6 +60,32 @@ and generates meeting briefs. A Next.js frontend provides a minimal UI.
    OAuth flow. This sets a session cookie tied to your account — every
    subsequent request infers the user from that cookie rather than trusting a
    client-supplied `user_id`.
+
+## Chat and selective auto-drafting
+
+- `POST /api/chat/message` (frontend: `/chat`) — a small LLM-routed chat
+  endpoint. "Reply"-style messages create a pending `Draft`; if the message
+  says "recent"/"latest"/"last email"/"newest" it drafts against that
+  specific message's real thread/content rather than a generic template.
+  "Schedule"-style messages return a proposed calendar event for the
+  frontend to confirm (via the existing, approval-gated
+  `/mcp/calendar/create_event`) — nothing is created until confirmed.
+- `POST /api/drafts/batch_generate` (frontend: a button on `/drafts`) —
+  scans the inbox (default: last 7 days) and drafts a reply for every real,
+  not-yet-drafted thread. Selective by design
+  (`app/services/email_filters.py`): skips senders matching a
+  no-reply/notification pattern, and skips anything carrying a
+  `List-Unsubscribe` header (the standard signal for mailing-list/marketing
+  mail), so it won't draft replies to notifications or newsletters. Safe to
+  re-run — threads that already have a draft are skipped, not duplicated.
+- Both paths only ever create `Draft` rows with `status="pending"`. Nothing
+  is sent without going through the existing `/api/drafts/approve` →
+  `/api/drafts/send` flow.
+- All LLM calls (`app/ai/llm.py`, `task_extractor.py`, `meeting_brief.py`,
+  `chat.py`) fall back to a template/heuristic if `OPENAI_API_KEY` is unset
+  **or** if the call fails for any reason (invalid key, network error,
+  malformed response) — a bad key degrades draft quality, it doesn't crash
+  the request.
 
 ## Standalone Gmail test script (`backend/`)
 

@@ -14,12 +14,10 @@ def _llm_extract_tasks(text: str) -> List[Dict]:
     system = "You are an assistant that extracts actionable tasks from email content. For each task return a JSON object with fields: description, due_date (ISO or null), action_required (short label). Return only JSON array."
     prompt = f"Email content:\n{text}\n\nExtract tasks as JSON array."
     data = {"model": "gpt-4o-mini", "messages": [{"role": "system", "content": system}, {"role": "user", "content": prompt}], "max_tokens": 512}
-    resp = requests.post(url, headers=headers, data=json.dumps(data), timeout=15)
-    resp.raise_for_status()
-    j = resp.json()
     try:
-        content = j["choices"][0]["message"]["content"]
-        # Attempt to parse JSON from content
+        resp = requests.post(url, headers=headers, data=json.dumps(data), timeout=15)
+        resp.raise_for_status()
+        content = resp.json()["choices"][0]["message"]["content"]
         tasks = json.loads(content)
         if isinstance(tasks, list):
             return tasks

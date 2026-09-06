@@ -4,6 +4,7 @@ from services.backend.app.auth.token_store import get_credentials_for_user
 from services.backend.app.auth.session import get_current_user_id
 from services.backend.app.services.gmail import GmailService
 from services.backend.app.ai.llm import generate_draft_from_context
+from services.backend.app.services.email_filters import is_likely_automated
 from services.backend.app.db import SessionLocal
 from services.backend.app import models
 from services.worker.tasks import send_draft_task
@@ -20,6 +21,11 @@ class GenerateDraftRequest(BaseModel):
 
 class ActionRequest(BaseModel):
     draft_id: int
+
+
+class BatchGenerateRequest(BaseModel):
+    query: str = "in:inbox newer_than:7d"
+    max_results: int = 25
 
 
 @router.post("/generate")
@@ -55,6 +61,77 @@ def generate_draft(req: GenerateDraftRequest, user_id: int = Depends(get_current
         db.commit()
         db.refresh(draft)
         return {"draft_id": draft.id, "body": draft.body}
+    finally:
+        db.close()
+
+
+@router.post("/batch_generate")
+def batch_generate_drafts(req: BatchGenerateRequest, user_id: int = Depends(get_current_user_id)):
+    """Scan the inbox and draft replies for real, not-yet-drafted threads.
+
+    Selective by design: skips automated/no-reply/mailing-list senders (see
+    email_filters.is_likely_automated) and any thread that already has a
+    draft, so this is safe to re-run on a schedule without creating
+    duplicates or replying to notifications. Never sends or approves
+    anything — every draft lands with status="pending".
+    """
+    creds = get_credentials_for_user(user_id)
+    if not creds:
+        raise HTTPException(status_code=404, detail="credentials not found for user")
+
+    svc = GmailService(creds)
+    matches = svc.search_emails(req.query, max_results=req.max_results)
+
+    db = SessionLocal()
+    try:
+        existing_thread_ids = {
+            row[0]
+            for row in db.query(models.Draft.thread_id)
+            .filter(models.Draft.user_id == user_id, models.Draft.thread_id.isnot(None))
+            .all()
+        }
+
+        created = []
+        skipped = []
+        for m in matches:
+            msg = svc.get_email(m["id"])
+            thread_id = msg.get("threadId")
+            from_addr = msg.get("from") or ""
+            subject = msg.get("subject") or ""
+            headers = msg.get("headers") or {}
+
+            if thread_id in existing_thread_ids:
+                skipped.append({"subject": subject, "from": from_addr, "reason": "already drafted"})
+                continue
+            if is_likely_automated(from_addr, headers):
+                skipped.append({"subject": subject, "from": from_addr, "reason": "automated/mailing-list sender"})
+                continue
+
+            context = msg.get("text") or msg.get("snippet") or ""
+            if not context.strip():
+                skipped.append({"subject": subject, "from": from_addr, "reason": "empty body"})
+                continue
+
+            body = generate_draft_from_context(subject, context)
+            draft = models.Draft(
+                user_id=user_id,
+                thread_id=thread_id,
+                subject=f"Re: {subject}" if subject else None,
+                body=body,
+                status="pending",
+            )
+            db.add(draft)
+            db.flush()
+            db.add(models.AuditLog(
+                user_id=user_id,
+                action="draft_created",
+                meta=str({"draft_id": draft.id, "source": "batch_generate"}),
+            ))
+            existing_thread_ids.add(thread_id)
+            created.append({"id": draft.id, "subject": subject, "from": from_addr})
+
+        db.commit()
+        return {"created": created, "skipped": skipped}
     finally:
         db.close()
 
