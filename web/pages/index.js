@@ -33,6 +33,7 @@ export default function Home() {
         <>
           <p>Connected as {user.email}</p>
           <nav style={{ display: 'flex', gap: 16, marginTop: 16 }}>
+            <Link href="/chat">Chat</Link>
             <Link href="/drafts">Drafts</Link>
             <Link href="/extract">Extract Tasks</Link>
             <Link href="/tasks">Tasks</Link>

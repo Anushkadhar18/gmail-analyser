@@ -7,6 +7,7 @@ from .api import drafts
 from .api import tasks as tasks_api
 from .api import approvals as approvals_api
 from .api import meetings as meetings_api
+from .api import chat as chat_api
 
 app = FastAPI(title="Gmail Calendar Assistant")
 
@@ -25,6 +26,7 @@ app.include_router(drafts.router, prefix="/api/drafts", tags=["drafts"])
 app.include_router(tasks_api.router, prefix="/api/tasks", tags=["tasks"])
 app.include_router(approvals_api.router, prefix="/api/approvals", tags=["approvals"])
 app.include_router(meetings_api.router, prefix="/api/meetings", tags=["meetings"])
+app.include_router(chat_api.router, prefix="/api/chat", tags=["chat"])
 
 
 @app.get("/health")
