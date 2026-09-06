@@ -46,8 +46,11 @@ export default function ChatPage() {
         (e.g. "schedule a sync with alice@example.com tomorrow at 3pm").
       </p>
 
-      <div style={{ border: '1px solid #ddd', borderRadius: 6, padding: 12, minHeight: 240, marginBottom: 12 }}>
-        {messages.length === 0 && <p style={{ color: '#999' }}>No messages yet</p>}
+      <div style={{ fontSize: 12, fontWeight: 'bold', color: '#888', textTransform: 'uppercase', marginBottom: 4 }}>
+        Conversation (not editable)
+      </div>
+      <div style={{ background: '#fafafa', border: '1px solid #eee', borderRadius: 6, padding: 12, minHeight: 240, marginBottom: 16 }}>
+        {messages.length === 0 && <p style={{ color: '#999', fontStyle: 'italic' }}>Nothing sent yet — type below and press Send.</p>}
         {messages.map((m, i) => (
           <div key={i} style={{ marginBottom: 12, textAlign: m.role === 'user' ? 'right' : 'left' }}>
             <div
@@ -73,16 +76,19 @@ export default function ChatPage() {
         ))}
       </div>
 
+      <label style={{ display: 'block', fontSize: 12, fontWeight: 'bold', color: '#888', textTransform: 'uppercase', marginBottom: 4 }}>
+        Type your message here
+      </label>
       <div style={{ display: 'flex', gap: 8 }}>
         <input
           autoFocus
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={onKeyDown}
-          placeholder="Type a message..."
-          style={{ flex: 1, padding: 8 }}
+          placeholder="e.g. reply to the most recent email saying thanks"
+          style={{ flex: 1, padding: '10px 12px', fontSize: 15, border: '2px solid #333', borderRadius: 6 }}
         />
-        <button onClick={send} disabled={sending}>
+        <button onClick={send} disabled={sending} style={{ padding: '10px 20px', fontSize: 15 }}>
           {sending ? 'Sending...' : 'Send'}
         </button>
       </div>
