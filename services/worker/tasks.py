@@ -30,12 +30,20 @@ def _all_user_ids_with_tokens():
 
 @celery_app.task
 def fetch_emails_task(user_id: int, query: str = "newer_than:2d"):
-    """Pull recent messages for a user and extract actionable tasks from any
-    message that hasn't been processed yet (dedup via Task.source_message_id).
+    """Pull recent messages for a user, extract actionable tasks, and draft a
+    reply for any real (non-automated) thread that doesn't have one yet.
+
+    Dedup: tasks by Task.source_message_id, drafts by Draft.thread_id — so
+    re-running this on a schedule never re-extracts or re-drafts the same
+    message/thread twice. Drafting is selective (see
+    app.services.email_filters.is_likely_automated) and only ever creates
+    Draft rows with status="pending" — nothing is approved or sent here.
     """
     from services.backend.app.auth.token_store import get_credentials_for_user
     from services.backend.app.services.gmail import GmailService
+    from services.backend.app.services.email_filters import is_likely_automated
     from services.backend.app.ai.task_extractor import extract_tasks_from_text
+    from services.backend.app.ai.llm import generate_draft_from_context
     from services.backend.app.db import SessionLocal
     from services.backend.app import models
     from datetime import datetime
@@ -54,48 +62,83 @@ def fetch_emails_task(user_id: int, query: str = "newer_than:2d"):
 
     db = SessionLocal()
     processed = 0
+    drafted = 0
     try:
-        existing_ids = {
+        existing_task_ids = {
             row[0]
             for row in db.query(models.Task.source_message_id)
             .filter(models.Task.user_id == user_id, models.Task.source_message_id.isnot(None))
             .all()
         }
+        existing_draft_thread_ids = {
+            row[0]
+            for row in db.query(models.Draft.thread_id)
+            .filter(models.Draft.user_id == user_id, models.Draft.thread_id.isnot(None))
+            .all()
+        }
         for m in matches:
             message_id = m.get("id")
-            if not message_id or message_id in existing_ids:
+            if not message_id:
                 continue
+
+            needs_task_extraction = message_id not in existing_task_ids
+            # Fetching is the only way to learn a message's threadId, so pull
+            # it whenever either job might apply — cheaper than not knowing.
             try:
                 msg = svc.get_email(message_id)
             except Exception as e:
                 print(f"Failed to fetch message {message_id}: {e}")
                 continue
-            text = msg.get("text") or msg.get("snippet") or ""
-            if not text:
-                continue
-            for t in extract_tasks_from_text(text):
-                due = None
-                try:
-                    if t.get("due_date"):
-                        due = datetime.fromisoformat(t.get("due_date"))
-                except Exception:
-                    due = None
-                db.add(models.Task(
-                    user_id=user_id,
-                    source_message_id=message_id,
-                    description=t.get("description"),
-                    due_date=due,
-                    action_required=t.get("action_required"),
-                    meta=str(t),
-                ))
-            processed += 1
+
+            if needs_task_extraction:
+                text = msg.get("text") or msg.get("snippet") or ""
+                if text:
+                    for t in extract_tasks_from_text(text):
+                        due = None
+                        try:
+                            if t.get("due_date"):
+                                due = datetime.fromisoformat(t.get("due_date"))
+                        except Exception:
+                            due = None
+                        db.add(models.Task(
+                            user_id=user_id,
+                            source_message_id=message_id,
+                            description=t.get("description"),
+                            due_date=due,
+                            action_required=t.get("action_required"),
+                            meta=str(t),
+                        ))
+                    processed += 1
+
+            thread_id = msg.get("threadId")
+            if thread_id and thread_id not in existing_draft_thread_ids:
+                from_addr = msg.get("from") or ""
+                headers = msg.get("headers") or {}
+                subject = msg.get("subject") or ""
+                context = msg.get("text") or msg.get("snippet") or ""
+                if not is_likely_automated(from_addr, headers) and context.strip():
+                    body = generate_draft_from_context(subject, context)
+                    db.add(models.Draft(
+                        user_id=user_id,
+                        thread_id=thread_id,
+                        subject=f"Re: {subject}" if subject else None,
+                        body=body,
+                        status="pending",
+                    ))
+                    existing_draft_thread_ids.add(thread_id)
+                    drafted += 1
         db.add(models.AuditLog(
             user_id=user_id,
             action="emails_synced",
-            meta=str({"query": query, "messages_seen": len(matches), "messages_processed": processed}),
+            meta=str({
+                "query": query,
+                "messages_seen": len(matches),
+                "messages_processed": processed,
+                "drafts_created": drafted,
+            }),
         ))
         db.commit()
-        print(f"fetch_emails_task: user {user_id} processed {processed}/{len(matches)} messages")
+        print(f"fetch_emails_task: user {user_id} processed {processed} task-extractions, drafted {drafted} replies, out of {len(matches)} messages")
         return True
     finally:
         db.close()

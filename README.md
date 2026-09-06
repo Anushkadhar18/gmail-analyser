@@ -10,8 +10,10 @@ and generates meeting briefs. A Next.js frontend provides a minimal UI.
   routers (`/mcp/gmail`, `/mcp/calendar`), and the drafts/tasks/approvals/
   meetings APIs. Session auth via a signed httpOnly cookie set after OAuth.
 - `services/worker` — Celery worker + beat. Runs periodic Gmail sync (every 5
-  min) and token refresh (every 30 min), plus on-demand tasks (draft sending,
-  meeting brief generation).
+  min, `fetch_emails_task`) — extracts tasks **and** auto-drafts replies for
+  real, not-yet-drafted threads (see "Chat and selective auto-drafting"
+  below) — and token refresh (every 30 min), plus on-demand tasks (draft
+  sending, meeting brief generation).
 - `web` — Next.js frontend (pages: connect, chat, drafts, extract, tasks,
   approvals, meetings).
 - `infra/docker` — Docker Compose for local dev (Postgres, Redis, backend,
@@ -71,24 +73,35 @@ and generates meeting briefs. A Next.js frontend provides a minimal UI.
   "Schedule"-style messages return a proposed calendar event for the
   frontend to confirm (via the existing, approval-gated
   `/mcp/calendar/create_event`) — nothing is created until confirmed.
-- `POST /api/drafts/batch_generate` (frontend: a button on `/drafts`) —
+- `POST /api/drafts/batch_generate` (frontend: a button on `/drafts`) — the
+  on-demand version of the same logic the worker runs automatically (below):
   scans the inbox (default: last 7 days) and drafts a reply for every real,
-  not-yet-drafted thread. Selective by design
+  not-yet-drafted thread.
+- **Fully automated drafting**: `fetch_emails_task` (worker, every 5
+  minutes) does this without any button click — for each new message it
+  both extracts tasks *and*, if the message's thread doesn't have a draft
+  yet, drafts a reply. Selective by design
   (`app/services/email_filters.py`): skips senders matching a
   no-reply/notification pattern, and skips anything carrying a
   `List-Unsubscribe` header (the standard signal for mailing-list/marketing
   mail), so it won't draft replies to notifications or newsletters. Safe to
-  re-run — threads that already have a draft are skipped, not duplicated.
-- Both paths only ever create `Draft` rows with `status="pending"`. Nothing
-  is sent without going through the existing `/api/drafts/approve` →
-  `/api/drafts/send` flow.
+  run repeatedly — dedup is by `Task.source_message_id` and
+  `Draft.thread_id`, so nothing is ever re-extracted or re-drafted.
+- Every drafting path — chat, the manual batch button, and the automatic
+  worker sync — only ever creates `Draft` rows with `status="pending"`.
+  Nothing is ever sent automatically; every draft still requires a human to
+  go through `/api/drafts/approve` → `/api/drafts/send` (or the equivalent
+  buttons on `/drafts`).
 - All LLM calls (`app/ai/llm.py`, `task_extractor.py`, `meeting_brief.py`,
   `chat.py`) go through Groq's OpenAI-compatible API
   (`https://api.groq.com/openai/v1/chat/completions`, model
-  `llama-3.3-70b-versatile`) and fall back to a template/heuristic if
-  `GROQ_API_KEY` is unset **or** if the call fails for any reason (invalid
-  key, network error, malformed response) — a bad key degrades draft
-  quality, it doesn't crash the request.
+  `openai/gpt-oss-120b` with `reasoning_effort: "low"` — gpt-oss is a
+  reasoning model that would otherwise burn its token budget on hidden
+  chain-of-thought before writing the actual reply) and fall back to a
+  template/heuristic if `GROQ_API_KEY` is unset **or** if the call fails for
+  any reason (invalid key, network error, malformed response, empty
+  content) — a bad key degrades draft quality, it doesn't crash the
+  request.
 
 ## Standalone Gmail test script (`backend/`)
 
