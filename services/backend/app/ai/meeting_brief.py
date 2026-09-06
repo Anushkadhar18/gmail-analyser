@@ -58,12 +58,15 @@ def generate_meeting_brief(event: dict, related_emails: list[dict] | None = None
         url = "https://api.groq.com/openai/v1/chat/completions"
         headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
         data = {
-            "model": "llama-3.3-70b-versatile",
+            "model": "openai/gpt-oss-120b",
             "messages": [
                 {"role": "system", "content": system},
                 {"role": "user", "content": prompt_context},
             ],
             "max_tokens": 800,
+            # gpt-oss spends tokens on hidden reasoning before the real answer;
+            # without this, max_tokens can run out before the JSON is emitted.
+            "reasoning_effort": "low",
         }
         try:
             resp = requests.post(url, headers=headers, data=json.dumps(data), timeout=20)

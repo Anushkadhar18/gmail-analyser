@@ -32,9 +32,12 @@ def _llm_interpret(message: str) -> Dict | None:
         "Return only the JSON object, nothing else."
     )
     data = {
-        "model": "llama-3.3-70b-versatile",
+        "model": "openai/gpt-oss-120b",
         "messages": [{"role": "system", "content": system}, {"role": "user", "content": message}],
         "max_tokens": 400,
+        # gpt-oss spends tokens on hidden reasoning before the real answer;
+        # without this, max_tokens can run out before the JSON is emitted.
+        "reasoning_effort": "low",
     }
     try:
         resp = requests.post(url, headers=headers, data=json.dumps(data), timeout=15)

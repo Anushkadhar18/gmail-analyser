@@ -24,13 +24,18 @@ def generate_draft_from_context(subject: str | None, context: str) -> str:
             if subject:
                 prompt = f"Subject: {subject}\n\n" + prompt
             data = {
-                "model": "llama-3.3-70b-versatile",
+                "model": "openai/gpt-oss-120b",
                 "messages": [{"role": "system", "content": system}, {"role": "user", "content": prompt}],
                 "max_tokens": 512,
+                # gpt-oss is a reasoning model that spends tokens on a hidden
+                # "reasoning" field before the actual answer; without this,
+                # max_tokens can run out mid-reasoning and leave content empty.
+                "reasoning_effort": "low",
             }
             resp = requests.post(url, headers=headers, data=json.dumps(data), timeout=15)
             resp.raise_for_status()
-            return resp.json()["choices"][0]["message"]["content"]
+            content = resp.json()["choices"][0]["message"]["content"]
+            return content or _fallback_template()
         except Exception:
             return _fallback_template()
     return _fallback_template()
