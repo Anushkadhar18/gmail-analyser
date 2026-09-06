@@ -75,6 +75,7 @@ export default function ChatPage() {
 
       <div style={{ display: 'flex', gap: 8 }}>
         <input
+          autoFocus
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={onKeyDown}
