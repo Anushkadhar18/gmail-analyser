@@ -3,7 +3,7 @@ from pydantic import BaseModel
 from services.backend.app.auth.session import get_current_user_id
 from services.backend.app.auth.token_store import get_credentials_for_user
 from services.backend.app.ai.chat import interpret_message
-from services.backend.app.ai.llm import generate_draft_from_context
+from services.backend.app.ai.llm import analyze_and_draft_reply
 from services.backend.app.services.gmail import GmailService
 from services.backend.app.services.email_filters import is_likely_automated
 from services.backend.app.services.email_builder import build_raw_message
@@ -73,7 +73,14 @@ def send_chat_message(req: ChatMessageRequest, user_id: int = Depends(get_curren
                 }
 
             context = msg.get("text") or msg.get("snippet") or ""
-            body = generate_draft_from_context(subject, context)
+            analysis = analyze_and_draft_reply(subject, context)
+            if not analysis.get("reply_required"):
+                return {
+                    "intent": "chat",
+                    "reply_text": f"\"{subject}\" from {from_addr} doesn't look like it needs a reply "
+                    f"({analysis.get('reply_type', 'no response needed')}), so I skipped drafting one.",
+                }
+            body = analysis["draft"]
 
         draft_subject = f"Re: {subject}" if subject and thread_id else subject
         db = SessionLocal()

@@ -3,7 +3,7 @@ from pydantic import BaseModel
 from services.backend.app.auth.token_store import get_credentials_for_user
 from services.backend.app.auth.session import get_current_user_id
 from services.backend.app.services.gmail import GmailService
-from services.backend.app.ai.llm import generate_draft_from_context
+from services.backend.app.ai.llm import analyze_and_draft_reply
 from services.backend.app.services.email_filters import is_likely_automated
 from services.backend.app.services.email_builder import build_raw_message
 from services.backend.app.db import SessionLocal
@@ -42,31 +42,49 @@ def generate_draft(req: GenerateDraftRequest, user_id: int = Depends(get_current
     in_reply_to = None
     if thread_id:
         thread = svc.get_thread(thread_id)
+        # Full text per message, not just Gmail's truncated snippet, and
+        # labeled by sender — the drafting prompt needs real thread context,
+        # not just the latest line.
         for msg in thread.get("messages", []):
-            snippet = msg.get("snippet")
-            if snippet:
-                context_parts.append(snippet)
+            text = msg.get("text") or msg.get("snippet") or ""
+            if text.strip():
+                context_parts.append(f"From: {msg.get('from', 'unknown')}\n{text.strip()}")
         if thread.get("messages"):
             last = thread["messages"][-1]
             from_addr = last.get("from")
             in_reply_to = (last.get("headers") or {}).get("message-id")
     elif req.message_id:
         msg = svc.get_email(req.message_id)
-        if msg.get("snippet"):
-            context_parts.append(msg.get("snippet"))
+        text = msg.get("text") or msg.get("snippet") or ""
+        if text.strip():
+            context_parts.append(f"From: {msg.get('from', 'unknown')}\n{text.strip()}")
         from_addr = msg.get("from")
         in_reply_to = (msg.get("headers") or {}).get("message-id")
 
-    context = "\n\n".join(context_parts)
-    body = generate_draft_from_context(req.subject, context)
+    context = "\n\n---\n\n".join(context_parts)
+    result = analyze_and_draft_reply(req.subject, context)
+
+    if not result.get("reply_required"):
+        return {
+            "draft_id": None,
+            "reply_required": False,
+            "reply_type": result.get("reply_type"),
+            "reason": "This email doesn't look like it needs a reply.",
+        }
+
+    body = result["draft"]
 
     db = SessionLocal()
     try:
         draft = models.Draft(user_id=user_id, thread_id=thread_id, subject=req.subject, body=body, status="pending")
         db.add(draft)
         db.flush()
-        # audit
-        db.add(models.AuditLog(user_id=user_id, action="draft_created", meta=str({"draft_id": draft.id})))
+        db.add(models.AuditLog(user_id=user_id, action="draft_created", meta=str({
+            "draft_id": draft.id,
+            "reply_type": result.get("reply_type"),
+            "tone": result.get("tone"),
+            "confidence": result.get("confidence"),
+        })))
         db.commit()
         db.refresh(draft)
 
@@ -79,7 +97,13 @@ def generate_draft(req: GenerateDraftRequest, user_id: int = Depends(get_current
             except Exception:
                 pass
 
-        return {"draft_id": draft.id, "body": draft.body}
+        return {
+            "draft_id": draft.id,
+            "body": draft.body,
+            "tone": result.get("tone"),
+            "confidence": result.get("confidence"),
+            "reply_type": result.get("reply_type"),
+        }
     finally:
         db.close()
 
@@ -131,7 +155,16 @@ def batch_generate_drafts(req: BatchGenerateRequest, user_id: int = Depends(get_
                 skipped.append({"subject": subject, "from": from_addr, "reason": "empty body"})
                 continue
 
-            body = generate_draft_from_context(subject, context)
+            result = analyze_and_draft_reply(subject, context)
+            if not result.get("reply_required"):
+                skipped.append({
+                    "subject": subject,
+                    "from": from_addr,
+                    "reason": f"no reply needed ({result.get('reply_type', 'n/a')})",
+                })
+                continue
+
+            body = result["draft"]
             draft_subject = f"Re: {subject}" if subject else None
             draft = models.Draft(
                 user_id=user_id,
@@ -145,10 +178,16 @@ def batch_generate_drafts(req: BatchGenerateRequest, user_id: int = Depends(get_
             db.add(models.AuditLog(
                 user_id=user_id,
                 action="draft_created",
-                meta=str({"draft_id": draft.id, "source": "batch_generate"}),
+                meta=str({
+                    "draft_id": draft.id,
+                    "source": "batch_generate",
+                    "reply_type": result.get("reply_type"),
+                    "tone": result.get("tone"),
+                    "confidence": result.get("confidence"),
+                }),
             ))
             existing_thread_ids.add(thread_id)
-            created.append({"id": draft.id, "subject": subject, "from": from_addr})
+            created.append({"id": draft.id, "subject": subject, "from": from_addr, "tone": result.get("tone")})
 
             # Best-effort: also create a real Gmail draft.
             try:

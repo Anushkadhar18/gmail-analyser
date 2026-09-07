@@ -35,16 +35,20 @@ def fetch_emails_task(user_id: int, query: str = "newer_than:2d"):
 
     Dedup: tasks by Task.source_message_id, drafts by Draft.thread_id — so
     re-running this on a schedule never re-extracts or re-drafts the same
-    message/thread twice. Drafting is selective (see
-    app.services.email_filters.is_likely_automated) and only ever creates
-    Draft rows with status="pending" — nothing is approved or sent here.
+    message/thread twice. Drafting is selective in two layers: a cheap
+    sender-pattern check (app.services.email_filters.is_likely_automated)
+    skips obvious no-reply/mailing-list senders before spending an LLM call,
+    then analyze_and_draft_reply makes the actual judgment call on whether
+    the email's content needs a reply at all (e.g. a real person's FYI with
+    no question in it). Only ever creates Draft rows with status="pending"
+    — nothing is approved or sent here.
     """
     from services.backend.app.auth.token_store import get_credentials_for_user
     from services.backend.app.services.gmail import GmailService
     from services.backend.app.services.email_filters import is_likely_automated
     from services.backend.app.services.email_builder import build_raw_message
     from services.backend.app.ai.task_extractor import extract_tasks_from_text
-    from services.backend.app.ai.llm import generate_draft_from_context
+    from services.backend.app.ai.llm import analyze_and_draft_reply
     from services.backend.app.db import SessionLocal
     from services.backend.app import models
     from datetime import datetime
@@ -118,25 +122,27 @@ def fetch_emails_task(user_id: int, query: str = "newer_than:2d"):
                 subject = msg.get("subject") or ""
                 context = msg.get("text") or msg.get("snippet") or ""
                 if not is_likely_automated(from_addr, headers) and context.strip():
-                    body = generate_draft_from_context(subject, context)
-                    draft_subject = f"Re: {subject}" if subject else None
-                    db.add(models.Draft(
-                        user_id=user_id,
-                        thread_id=thread_id,
-                        subject=draft_subject,
-                        body=body,
-                        status="pending",
-                    ))
-                    existing_draft_thread_ids.add(thread_id)
-                    drafted += 1
+                    analysis = analyze_and_draft_reply(subject, context)
+                    if analysis.get("reply_required"):
+                        body = analysis["draft"]
+                        draft_subject = f"Re: {subject}" if subject else None
+                        db.add(models.Draft(
+                            user_id=user_id,
+                            thread_id=thread_id,
+                            subject=draft_subject,
+                            body=body,
+                            status="pending",
+                        ))
+                        existing_draft_thread_ids.add(thread_id)
+                        drafted += 1
 
-                    # Best-effort: also create a real Gmail draft.
-                    try:
-                        in_reply_to = headers.get("message-id")
-                        raw = build_raw_message(from_addr, draft_subject, body, in_reply_to=in_reply_to)
-                        svc.create_draft(raw, thread_id=thread_id)
-                    except Exception as e:
-                        print(f"Failed to create Gmail draft for thread {thread_id}: {e}")
+                        # Best-effort: also create a real Gmail draft.
+                        try:
+                            in_reply_to = headers.get("message-id")
+                            raw = build_raw_message(from_addr, draft_subject, body, in_reply_to=in_reply_to)
+                            svc.create_draft(raw, thread_id=thread_id)
+                        except Exception as e:
+                            print(f"Failed to create Gmail draft for thread {thread_id}: {e}")
         db.add(models.AuditLog(
             user_id=user_id,
             action="emails_synced",
