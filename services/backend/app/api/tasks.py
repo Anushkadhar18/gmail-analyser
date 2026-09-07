@@ -21,6 +21,12 @@ class CompleteRequest(BaseModel):
     completed: bool = True
 
 
+class CreateTaskRequest(BaseModel):
+    description: str
+    due_date: str | None = None
+    action_required: str | None = None
+
+
 @router.post("/extract")
 def extract_tasks(req: ExtractRequest, user_id: int = Depends(get_current_user_id)):
     creds = get_credentials_for_user(user_id)
@@ -60,6 +66,44 @@ def extract_tasks(req: ExtractRequest, user_id: int = Depends(get_current_user_i
             stored.append({"id": task.id, "description": task.description, "due_date": task.due_date})
         db.commit()
         return {"extracted": stored}
+    finally:
+        db.close()
+
+
+@router.post("/create")
+def create_task(req: CreateTaskRequest, user_id: int = Depends(get_current_user_id)):
+    """Manually add a task, independent of email extraction."""
+    if not req.description.strip():
+        raise HTTPException(status_code=400, detail="description is required")
+
+    due = None
+    if req.due_date:
+        try:
+            due = datetime.fromisoformat(req.due_date)
+        except Exception:
+            raise HTTPException(status_code=400, detail="due_date must be ISO 8601 (e.g. 2026-09-10T15:00:00)")
+
+    db = SessionLocal()
+    try:
+        task = models.Task(
+            user_id=user_id,
+            source_message_id=None,
+            description=req.description.strip(),
+            due_date=due,
+            action_required=req.action_required,
+        )
+        db.add(task)
+        db.flush()
+        db.add(models.AuditLog(user_id=user_id, action="task_created_manually", meta=str({"task_id": task.id})))
+        db.commit()
+        return {
+            "id": task.id,
+            "description": task.description,
+            "due_date": task.due_date,
+            "action_required": task.action_required,
+            "completed": False,
+            "source_message_id": None,
+        }
     finally:
         db.close()
 

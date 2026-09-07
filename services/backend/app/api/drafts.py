@@ -29,6 +29,12 @@ class BatchGenerateRequest(BaseModel):
     max_results: int = 25
 
 
+class UpdateDraftRequest(BaseModel):
+    draft_id: int
+    subject: str | None = None
+    body: str | None = None
+
+
 @router.post("/generate")
 def generate_draft(req: GenerateDraftRequest, user_id: int = Depends(get_current_user_id)):
     creds = get_credentials_for_user(user_id)
@@ -209,6 +215,45 @@ def list_drafts(user_id: int = Depends(get_current_user_id)):
     try:
         drafts = db.query(models.Draft).filter(models.Draft.user_id == user_id).order_by(models.Draft.created_at.desc()).all()
         return [{"id": d.id, "subject": d.subject, "body": d.body, "status": d.status} for d in drafts]
+    finally:
+        db.close()
+
+
+@router.post("/update")
+def update_draft(req: UpdateDraftRequest, user_id: int = Depends(get_current_user_id)):
+    """Edit a draft's subject/body before it's sent.
+
+    Editing an already-approved draft resets it to "pending" — you're
+    changing what was approved, so it needs a fresh approval. Editing after
+    it's queued/sent is rejected outright; that copy is already on its way.
+    """
+    db = SessionLocal()
+    try:
+        draft = db.query(models.Draft).filter(models.Draft.id == req.draft_id, models.Draft.user_id == user_id).one_or_none()
+        if not draft:
+            raise HTTPException(status_code=404, detail="draft not found")
+        if draft.status in ("queued", "sent"):
+            raise HTTPException(status_code=400, detail=f"draft is already {draft.status}, can't edit it now")
+
+        if req.subject is not None:
+            draft.subject = req.subject
+        if req.body is not None:
+            if not req.body.strip():
+                raise HTTPException(status_code=400, detail="body can't be empty")
+            draft.body = req.body
+
+        reverted = draft.status == "approved"
+        if reverted:
+            draft.status = "pending"
+            draft.approved_at = None
+
+        db.add(models.AuditLog(user_id=user_id, action="draft_edited", meta=str({
+            "draft_id": draft.id,
+            "reverted_to_pending": reverted,
+        })))
+        db.commit()
+        db.refresh(draft)
+        return {"id": draft.id, "subject": draft.subject, "body": draft.body, "status": draft.status}
     finally:
         db.close()
 

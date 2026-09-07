@@ -1,13 +1,17 @@
 import React, { useEffect, useState } from 'react'
 import { apiFetch } from '../lib/api'
 import Layout from '../components/Layout'
-import { PALETTE, cardStyle, primaryButtonStyle, statusPillStyle } from '../lib/theme'
+import { PALETTE, cardStyle, primaryButtonStyle, secondaryButtonStyle, inputStyle, statusPillStyle } from '../lib/theme'
 
 export default function Drafts() {
   const [drafts, setDrafts] = useState([])
   const [scanning, setScanning] = useState(false)
   const [scanResult, setScanResult] = useState(null)
   const [busyId, setBusyId] = useState(null)
+  const [editingId, setEditingId] = useState(null)
+  const [editSubject, setEditSubject] = useState('')
+  const [editBody, setEditBody] = useState('')
+  const [saving, setSaving] = useState(false)
 
   const load = () => {
     apiFetch('/api/drafts/list').then(setDrafts).catch(() => setDrafts([]))
@@ -49,6 +53,30 @@ export default function Drafts() {
     }
   }
 
+  const startEdit = (d) => {
+    setEditingId(d.id)
+    setEditSubject(d.subject || '')
+    setEditBody(d.body)
+  }
+
+  const cancelEdit = () => {
+    setEditingId(null)
+  }
+
+  const saveEdit = async (id) => {
+    setSaving(true)
+    try {
+      const updated = await apiFetch('/api/drafts/update', {
+        method: 'POST',
+        body: JSON.stringify({ draft_id: id, subject: editSubject, body: editBody }),
+      })
+      setDrafts((d) => d.map((x) => (x.id === id ? { ...x, subject: updated.subject, body: updated.body, status: updated.status } : x)))
+      setEditingId(null)
+    } finally {
+      setSaving(false)
+    }
+  }
+
   return (
     <Layout title="Drafts" subtitle="A background sync already does this every 5 minutes on its own — this button just runs it now.">
       <div style={{ ...cardStyle, marginBottom: 20, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
@@ -77,30 +105,79 @@ export default function Drafts() {
       )}
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-        {drafts.map((d) => (
-          <div key={d.id} style={cardStyle}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, marginBottom: 10 }}>
-              <div style={{ fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 16 }}>{d.subject || 'No subject'}</div>
-              <span style={statusPillStyle(d.status)}>{d.status}</span>
+        {drafts.map((d) => {
+          const isEditing = editingId === d.id
+          const canEdit = d.status === 'pending' || d.status === 'approved'
+
+          return (
+            <div key={d.id} style={cardStyle}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, marginBottom: 10 }}>
+                {isEditing ? (
+                  <input
+                    value={editSubject}
+                    onChange={(e) => setEditSubject(e.target.value)}
+                    placeholder="Subject"
+                    style={{ ...inputStyle, fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 15, flex: 1 }}
+                  />
+                ) : (
+                  <div style={{ fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 16 }}>{d.subject || 'No subject'}</div>
+                )}
+                <span style={statusPillStyle(d.status)}>{d.status}</span>
+              </div>
+
+              {isEditing ? (
+                <textarea
+                  value={editBody}
+                  onChange={(e) => setEditBody(e.target.value)}
+                  rows={8}
+                  style={{ ...inputStyle, fontSize: 14, lineHeight: 1.6, resize: 'vertical', marginBottom: 12 }}
+                />
+              ) : (
+                <p style={{ whiteSpace: 'pre-wrap', fontSize: 14, lineHeight: 1.6, color: PALETTE.text, margin: '0 0 14px' }}>{d.body}</p>
+              )}
+
+              {d.status === 'approved' && isEditing && (
+                <p style={{ fontSize: 12, color: PALETTE.warning, margin: '-6px 0 12px' }}>
+                  Saving will move this back to "pending" — you'll need to approve it again.
+                </p>
+              )}
+
+              <div style={{ display: 'flex', gap: 8 }}>
+                {isEditing ? (
+                  <>
+                    <button onClick={() => saveEdit(d.id)} disabled={saving || !editBody.trim()} style={{ ...primaryButtonStyle, opacity: saving || !editBody.trim() ? 0.6 : 1 }}>
+                      {saving ? 'Saving…' : 'Save'}
+                    </button>
+                    <button onClick={cancelEdit} disabled={saving} style={secondaryButtonStyle}>
+                      Cancel
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    {d.status === 'pending' && (
+                      <button onClick={() => approve(d.id)} disabled={busyId === d.id} style={primaryButtonStyle}>
+                        {busyId === d.id ? 'Approving…' : 'Approve'}
+                      </button>
+                    )}
+                    {d.status === 'approved' && (
+                      <button onClick={() => send(d.id)} disabled={busyId === d.id} style={primaryButtonStyle}>
+                        {busyId === d.id ? 'Sending…' : 'Send'}
+                      </button>
+                    )}
+                    {canEdit && (
+                      <button onClick={() => startEdit(d)} style={secondaryButtonStyle}>
+                        Edit
+                      </button>
+                    )}
+                    {(d.status === 'queued' || d.status === 'sent') && (
+                      <span style={{ fontSize: 12.5, color: PALETTE.muted }}>On its way — no further action needed.</span>
+                    )}
+                  </>
+                )}
+              </div>
             </div>
-            <p style={{ whiteSpace: 'pre-wrap', fontSize: 14, lineHeight: 1.6, color: PALETTE.text, margin: '0 0 14px' }}>{d.body}</p>
-            <div style={{ display: 'flex', gap: 8 }}>
-              {d.status === 'pending' && (
-                <button onClick={() => approve(d.id)} disabled={busyId === d.id} style={primaryButtonStyle}>
-                  {busyId === d.id ? 'Approving…' : 'Approve'}
-                </button>
-              )}
-              {d.status === 'approved' && (
-                <button onClick={() => send(d.id)} disabled={busyId === d.id} style={primaryButtonStyle}>
-                  {busyId === d.id ? 'Sending…' : 'Send'}
-                </button>
-              )}
-              {(d.status === 'queued' || d.status === 'sent') && (
-                <span style={{ fontSize: 12.5, color: PALETTE.muted }}>On its way — no further action needed.</span>
-              )}
-            </div>
-          </div>
-        ))}
+          )
+        })}
       </div>
     </Layout>
   )
