@@ -1,21 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { apiFetch } from '../lib/api'
-
-const PALETTE = {
-  bg: '#FAF9F5',
-  panel: '#FFFFFF',
-  border: '#E4DFD3',
-  borderStrong: '#1F2422',
-  text: '#1F2422',
-  muted: '#8A8478',
-  accent: '#1B4B43',
-  accentDark: '#123832',
-  userBubble: '#E8F1EE',
-  userText: '#153A34',
-  assistantBubble: '#F3F1EA',
-  danger: '#B5502D',
-  success: '#3F7A5C',
-}
+import Layout from '../components/Layout'
+import { PALETTE } from '../lib/theme'
 
 const SUGGESTIONS = [
   'reply to the most recent email saying thanks, all good',
@@ -115,22 +101,21 @@ export default function ChatPage() {
   }
 
   return (
-    <div style={{ minHeight: '100vh', background: PALETTE.bg, padding: '40px 24px', fontFamily: 'var(--font-body)', color: PALETTE.text }}>
-      <div style={{ maxWidth: 680, margin: '0 auto' }}>
-        <div style={{ marginBottom: 20 }}>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
-            <h1 style={{ fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 30, margin: 0, letterSpacing: '-0.01em' }}>Assistant</h1>
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 12, color: PALETTE.success, fontWeight: 600 }}>
-              <span style={{ width: 6, height: 6, borderRadius: '50%', background: PALETTE.success, display: 'inline-block' }} />
-              online
-            </span>
-          </div>
-          <p style={{ color: PALETTE.muted, fontSize: 14, marginTop: 4, lineHeight: 1.5 }}>
-            Drafts replies and proposes meetings from your Gmail and Calendar. Nothing sends without your review.
-          </p>
+    <Layout maxWidth={680}>
+      <div style={{ marginBottom: 20 }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
+          <h1 style={{ fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 30, margin: 0, letterSpacing: '-0.01em' }}>Assistant</h1>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 12, color: PALETTE.success, fontWeight: 600 }}>
+            <span style={{ width: 6, height: 6, borderRadius: '50%', background: PALETTE.success, display: 'inline-block' }} />
+            online
+          </span>
         </div>
+        <p style={{ color: PALETTE.muted, fontSize: 14, marginTop: 4, lineHeight: 1.5 }}>
+          Drafts replies and proposes meetings from your Gmail and Calendar. Nothing sends without your review.
+        </p>
+      </div>
 
-        <div
+      <div
           style={{
             background: PALETTE.panel,
             border: `1px solid ${PALETTE.border}`,
@@ -323,7 +308,6 @@ export default function ChatPage() {
             </button>
           </div>
         </div>
-      </div>
 
       <style jsx>{`
         .suggestion:hover {
@@ -340,6 +324,6 @@ export default function ChatPage() {
           background: ${PALETTE.accentDark} !important;
         }
       `}</style>
-    </div>
+    </Layout>
   )
 }

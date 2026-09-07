@@ -1,8 +1,11 @@
 import React, { useEffect, useState } from 'react'
 import { apiFetch } from '../lib/api'
+import Layout from '../components/Layout'
+import { PALETTE, cardStyle, secondaryButtonStyle } from '../lib/theme'
 
 export default function TasksPage() {
   const [tasks, setTasks] = useState([])
+  const [busyId, setBusyId] = useState(null)
 
   const load = () => {
     apiFetch('/api/tasks/list').then(setTasks).catch(() => setTasks([]))
@@ -11,23 +14,33 @@ export default function TasksPage() {
   useEffect(load, [])
 
   const complete = async (id) => {
-    await apiFetch('/api/tasks/complete', { method: 'POST', body: JSON.stringify({ task_id: id, completed: true }) })
-    setTasks(tasks.filter(t => t.id !== id))
+    setBusyId(id)
+    try {
+      await apiFetch('/api/tasks/complete', { method: 'POST', body: JSON.stringify({ task_id: id, completed: true }) })
+      setTasks((t) => t.filter((x) => x.id !== id))
+    } finally {
+      setBusyId(null)
+    }
   }
 
   return (
-    <div style={{ padding: 24 }}>
-      <h2>Tasks</h2>
-      {tasks.length === 0 && <p>No open tasks</p>}
-      <ul>
-        {tasks.map(t => (
-          <li key={t.id} style={{ marginBottom: 12 }}>
-            <span>{t.description}</span>
-            {t.due_date && <span> (due {t.due_date})</span>}
-            <button style={{ marginLeft: 12 }} onClick={() => complete(t.id)}>Mark done</button>
-          </li>
+    <Layout title="Tasks" subtitle="Action items automatically extracted from your inbox by the background sync, or on demand from the Extract Tasks page.">
+      {tasks.length === 0 && (
+        <div style={{ ...cardStyle, textAlign: 'center', color: PALETTE.muted, fontSize: 14 }}>No open tasks.</div>
+      )}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {tasks.map((t) => (
+          <div key={t.id} style={{ ...cardStyle, padding: '14px 18px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+            <div style={{ fontSize: 14, lineHeight: 1.5 }}>
+              {t.description}
+              {t.due_date && <span style={{ color: PALETTE.muted, fontSize: 12.5 }}> — due {t.due_date}</span>}
+            </div>
+            <button onClick={() => complete(t.id)} disabled={busyId === t.id} style={{ ...secondaryButtonStyle, flexShrink: 0 }}>
+              {busyId === t.id ? 'Marking…' : 'Mark done'}
+            </button>
+          </div>
         ))}
-      </ul>
-    </div>
+      </div>
+    </Layout>
   )
 }

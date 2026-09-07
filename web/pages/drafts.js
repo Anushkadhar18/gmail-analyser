@@ -1,10 +1,13 @@
 import React, { useEffect, useState } from 'react'
 import { apiFetch } from '../lib/api'
+import Layout from '../components/Layout'
+import { PALETTE, cardStyle, primaryButtonStyle, statusPillStyle } from '../lib/theme'
 
 export default function Drafts() {
   const [drafts, setDrafts] = useState([])
   const [scanning, setScanning] = useState(false)
   const [scanResult, setScanResult] = useState(null)
+  const [busyId, setBusyId] = useState(null)
 
   const load = () => {
     apiFetch('/api/drafts/list').then(setDrafts).catch(() => setDrafts([]))
@@ -13,13 +16,23 @@ export default function Drafts() {
   useEffect(load, [])
 
   const approve = async (id) => {
-    await apiFetch('/api/drafts/approve', { method: 'POST', body: JSON.stringify({ draft_id: id }) })
-    setDrafts(drafts.map(d => d.id === id ? { ...d, status: 'approved' } : d))
+    setBusyId(id)
+    try {
+      await apiFetch('/api/drafts/approve', { method: 'POST', body: JSON.stringify({ draft_id: id }) })
+      setDrafts((d) => d.map((x) => (x.id === id ? { ...x, status: 'approved' } : x)))
+    } finally {
+      setBusyId(null)
+    }
   }
 
   const send = async (id) => {
-    await apiFetch('/api/drafts/send', { method: 'POST', body: JSON.stringify({ draft_id: id }) })
-    setDrafts(drafts.map(d => d.id === id ? { ...d, status: 'queued' } : d))
+    setBusyId(id)
+    try {
+      await apiFetch('/api/drafts/send', { method: 'POST', body: JSON.stringify({ draft_id: id }) })
+      setDrafts((d) => d.map((x) => (x.id === id ? { ...x, status: 'queued' } : x)))
+    } finally {
+      setBusyId(null)
+    }
   }
 
   const scanInbox = async () => {
@@ -37,41 +50,58 @@ export default function Drafts() {
   }
 
   return (
-    <div style={{ padding: 24 }}>
-      <h2>Drafts</h2>
-
-      <div style={{ marginBottom: 16 }}>
-        <button onClick={scanInbox} disabled={scanning}>
-          {scanning ? 'Scanning inbox...' : 'Draft replies for recent inbox emails'}
+    <Layout title="Drafts" subtitle="A background sync already does this every 5 minutes on its own — this button just runs it now.">
+      <div style={{ ...cardStyle, marginBottom: 20, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
+        <div>
+          <div style={{ fontWeight: 600, fontSize: 14.5, marginBottom: 3 }}>Scan recent inbox mail</div>
+          <div style={{ color: PALETTE.muted, fontSize: 13, lineHeight: 1.5, maxWidth: 480 }}>
+            Drafts a reply for each real, not-yet-drafted thread from the last 7 days. Automated senders and
+            emails that don't need a reply are skipped automatically. Nothing is sent.
+          </div>
+          {scanResult && !scanResult.error && (
+            <div style={{ marginTop: 8, fontSize: 12.5, color: PALETTE.success, fontWeight: 600 }}>
+              Created {scanResult.created.length}, skipped {scanResult.skipped.length}.
+            </div>
+          )}
+          {scanResult && scanResult.error && (
+            <div style={{ marginTop: 8, fontSize: 12.5, color: PALETTE.danger, fontWeight: 600 }}>Error: {scanResult.error}</div>
+          )}
+        </div>
+        <button onClick={scanInbox} disabled={scanning} style={{ ...primaryButtonStyle, opacity: scanning ? 0.6 : 1, flexShrink: 0 }}>
+          {scanning ? 'Scanning…' : 'Draft replies now'}
         </button>
-        <p style={{ color: '#666', fontSize: 13, marginTop: 4 }}>
-          Scans the last 7 days of inbox mail and drafts a reply for each real,
-          not-yet-drafted thread. Automated/no-reply/mailing-list senders are
-          skipped automatically. Nothing is sent — every draft still needs
-          Approve then Send below.
-        </p>
-        {scanResult && !scanResult.error && (
-          <p style={{ fontSize: 13 }}>
-            Created {scanResult.created.length}, skipped {scanResult.skipped.length}.
-          </p>
-        )}
-        {scanResult && scanResult.error && (
-          <p style={{ color: 'crimson', fontSize: 13 }}>Error: {scanResult.error}</p>
-        )}
       </div>
 
-      {drafts.length === 0 && <p>No drafts</p>}
-      <ul>
-        {drafts.map(d => (
-          <li key={d.id} style={{ marginBottom: 16 }}>
-            <strong>{d.subject || 'No subject'}</strong>
-            <p>{d.body}</p>
-            <p>Status: {d.status}</p>
-            {d.status === 'pending' && <button onClick={() => approve(d.id)}>Approve</button>}
-            {d.status === 'approved' && <button onClick={() => send(d.id)}>Send</button>}
-          </li>
+      {drafts.length === 0 && (
+        <div style={{ ...cardStyle, textAlign: 'center', color: PALETTE.muted, fontSize: 14 }}>No drafts yet.</div>
+      )}
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+        {drafts.map((d) => (
+          <div key={d.id} style={cardStyle}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, marginBottom: 10 }}>
+              <div style={{ fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 16 }}>{d.subject || 'No subject'}</div>
+              <span style={statusPillStyle(d.status)}>{d.status}</span>
+            </div>
+            <p style={{ whiteSpace: 'pre-wrap', fontSize: 14, lineHeight: 1.6, color: PALETTE.text, margin: '0 0 14px' }}>{d.body}</p>
+            <div style={{ display: 'flex', gap: 8 }}>
+              {d.status === 'pending' && (
+                <button onClick={() => approve(d.id)} disabled={busyId === d.id} style={primaryButtonStyle}>
+                  {busyId === d.id ? 'Approving…' : 'Approve'}
+                </button>
+              )}
+              {d.status === 'approved' && (
+                <button onClick={() => send(d.id)} disabled={busyId === d.id} style={primaryButtonStyle}>
+                  {busyId === d.id ? 'Sending…' : 'Send'}
+                </button>
+              )}
+              {(d.status === 'queued' || d.status === 'sent') && (
+                <span style={{ fontSize: 12.5, color: PALETTE.muted }}>On its way — no further action needed.</span>
+              )}
+            </div>
+          </div>
         ))}
-      </ul>
-    </div>
+      </div>
+    </Layout>
   )
 }
