@@ -74,6 +74,7 @@ export function statusPillStyle(kind) {
     approved: { bg: PALETTE.successBg, color: PALETTE.success },
     queued: { bg: PALETTE.userBubble, color: PALETTE.userText },
     sent: { bg: PALETTE.userBubble, color: PALETTE.userText },
+    rejected: { bg: PALETTE.dangerBg, color: PALETTE.danger },
     error: { bg: PALETTE.dangerBg, color: PALETTE.danger },
     default: { bg: PALETTE.assistantBubble, color: PALETTE.muted },
   }
