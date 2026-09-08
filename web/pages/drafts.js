@@ -49,6 +49,16 @@ export default function Drafts() {
     }
   }
 
+  const deleteDraft = async (id) => {
+    setBusyId(id)
+    try {
+      await apiFetch('/api/drafts/delete', { method: 'POST', body: JSON.stringify({ draft_id: id }) })
+      setDrafts((d) => d.filter((x) => x.id !== id))
+    } finally {
+      setBusyId(null)
+    }
+  }
+
   const scanInbox = async () => {
     setScanning(true)
     setScanResult(null)
@@ -184,11 +194,19 @@ export default function Drafts() {
                         Reject
                       </button>
                     )}
-                    {(d.status === 'queued' || d.status === 'sent') && (
+                    {d.status === 'queued' && (
                       <span style={{ fontSize: 12.5, color: PALETTE.muted }}>On its way — no further action needed.</span>
                     )}
+                    {d.status === 'sent' && (
+                      <span style={{ fontSize: 12.5, color: PALETTE.muted, marginRight: 4 }}>Sent.</span>
+                    )}
                     {d.status === 'rejected' && (
-                      <span style={{ fontSize: 12.5, color: PALETTE.muted }}>Dismissed — no longer active.</span>
+                      <span style={{ fontSize: 12.5, color: PALETTE.muted, marginRight: 4 }}>Dismissed.</span>
+                    )}
+                    {d.status !== 'queued' && (
+                      <button onClick={() => deleteDraft(d.id)} disabled={busyId === d.id} style={{ ...secondaryButtonStyle, color: PALETTE.muted }}>
+                        {busyId === d.id ? '…' : 'Delete'}
+                      </button>
                     )}
                   </>
                 )}

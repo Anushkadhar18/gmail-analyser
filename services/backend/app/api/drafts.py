@@ -294,6 +294,27 @@ def reject_draft(req: ActionRequest, user_id: int = Depends(get_current_user_id)
         db.close()
 
 
+@router.post("/delete")
+def delete_draft(req: ActionRequest, user_id: int = Depends(get_current_user_id)):
+    """Permanently remove a draft. Unlike reject (which keeps the record as
+    "rejected" for history), this deletes the row outright. Blocked while
+    queued — that copy is actively being sent by the worker right now.
+    """
+    db = SessionLocal()
+    try:
+        draft = db.query(models.Draft).filter(models.Draft.id == req.draft_id, models.Draft.user_id == user_id).one_or_none()
+        if not draft:
+            raise HTTPException(status_code=404, detail="draft not found")
+        if draft.status == "queued":
+            raise HTTPException(status_code=400, detail="draft is queued to send right now, can't delete it")
+        db.delete(draft)
+        db.add(models.AuditLog(user_id=user_id, action="draft_deleted", meta=str({"draft_id": req.draft_id})))
+        db.commit()
+        return {"status": "deleted", "draft_id": req.draft_id}
+    finally:
+        db.close()
+
+
 @router.post("/send")
 def send_draft(req: ActionRequest, user_id: int = Depends(get_current_user_id)):
     db = SessionLocal()

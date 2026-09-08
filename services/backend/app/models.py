@@ -48,6 +48,8 @@ class Task(Base):
     due_date = Column(DateTime(timezone=True), nullable=True)
     action_required = Column(String(64), nullable=True)
     completed = Column(Integer, nullable=False, server_default="0")
+    important = Column(Integer, nullable=False, server_default="0")
+    notes = Column(Text, nullable=True)
     meta = Column("metadata", Text)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
