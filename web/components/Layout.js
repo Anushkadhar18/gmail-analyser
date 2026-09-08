@@ -8,7 +8,6 @@ const NAV_ITEMS = [
   { href: '/chat', label: 'Chat' },
   { href: '/drafts', label: 'Drafts' },
   { href: '/tasks', label: 'Tasks' },
-  { href: '/extract', label: 'Extract Tasks' },
   { href: '/approvals', label: 'Approvals' },
   { href: '/meetings', label: 'Meeting Briefs' },
 ]

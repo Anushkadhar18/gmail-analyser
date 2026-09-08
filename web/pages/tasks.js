@@ -46,6 +46,12 @@ export default function TasksPage() {
   const [newDueDate, setNewDueDate] = useState('')
   const [adding, setAdding] = useState(false)
 
+  const [showEmailPicker, setShowEmailPicker] = useState(false)
+  const [emails, setEmails] = useState([])
+  const [emailsLoaded, setEmailsLoaded] = useState(false)
+  const [findingId, setFindingId] = useState(null)
+  const [foundCounts, setFoundCounts] = useState({})
+
   const load = (includeCompleted) => {
     apiFetch(`/api/tasks/list?include_completed=${includeCompleted}`).then(setTasks).catch(() => setTasks([]))
   }
@@ -81,6 +87,33 @@ export default function TasksPage() {
     }
   }
 
+  const openEmailPicker = () => {
+    setShowEmailPicker(true)
+    if (!emailsLoaded) {
+      apiFetch('/mcp/gmail/search_emails', { method: 'POST', body: JSON.stringify({ query: 'in:inbox newer_than:14d', max_results: 6 }) })
+        .then(async (res) => {
+          const ids = (res.results || []).map((r) => r.id)
+          const msgs = await Promise.all(
+            ids.map((id) => apiFetch('/mcp/gmail/get_email', { method: 'POST', body: JSON.stringify({ id }) }).catch(() => null))
+          )
+          setEmails(msgs.filter(Boolean))
+        })
+        .catch(() => setEmails([]))
+        .finally(() => setEmailsLoaded(true))
+    }
+  }
+
+  const findTasksIn = async (msg) => {
+    setFindingId(msg.id)
+    try {
+      const j = await apiFetch('/api/tasks/extract', { method: 'POST', body: JSON.stringify({ message_id: msg.id }) })
+      setFoundCounts((c) => ({ ...c, [msg.id]: j.extracted.length }))
+      if (j.extracted.length > 0) load(showCompleted)
+    } finally {
+      setFindingId(null)
+    }
+  }
+
   const visible = useMemo(() => {
     const filtered = query.trim()
       ? tasks.filter((t) => t.description.toLowerCase().includes(query.trim().toLowerCase()))
@@ -105,8 +138,8 @@ export default function TasksPage() {
       title="Tasks"
       subtitle={
         overdueCount > 0
-          ? `${openCount} open, ${overdueCount} overdue — extracted from your inbox automatically, or added by hand below.`
-          : `${openCount} open — extracted from your inbox automatically, or added by hand below.`
+          ? `${openCount} open, ${overdueCount} overdue — found automatically every 5 minutes, or add your own below.`
+          : `${openCount} open — found automatically every 5 minutes, or add your own below.`
       }
     >
       <div style={{ ...cardStyle, marginBottom: 16 }}>
@@ -131,6 +164,50 @@ export default function TasksPage() {
             {adding ? 'Adding…' : 'Add'}
           </button>
         </div>
+      </div>
+
+      <div style={{ ...cardStyle, marginBottom: 16 }}>
+        <button
+          onClick={() => (showEmailPicker ? setShowEmailPicker(false) : openEmailPicker())}
+          style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left' }}
+        >
+          <span style={{ fontSize: 12, fontWeight: 700, color: PALETTE.accent, textTransform: 'uppercase', letterSpacing: '0.03em' }}>
+            {showEmailPicker ? '▾' : '▸'} Find tasks in a recent email
+          </span>
+        </button>
+
+        {showEmailPicker && (
+          <div style={{ marginTop: 12 }}>
+            {!emailsLoaded && <p style={{ color: PALETTE.muted, fontSize: 13.5, margin: 0 }}>Loading recent inbox mail…</p>}
+            {emailsLoaded && emails.length === 0 && <p style={{ color: PALETTE.muted, fontSize: 13.5, margin: 0 }}>No recent inbox mail found.</p>}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {emails.map((msg) => {
+                const found = foundCounts[msg.id]
+                return (
+                  <div key={msg.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '8px 0', borderTop: `1px solid ${PALETTE.border}` }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: 13.5, fontWeight: 600 }}>{msg.subject || '(no subject)'}</div>
+                      <div style={{ color: PALETTE.muted, fontSize: 12 }}>{msg.from}</div>
+                    </div>
+                    <button
+                      onClick={() => findTasksIn(msg)}
+                      disabled={findingId === msg.id}
+                      style={{ ...secondaryButtonStyle, flexShrink: 0, fontSize: 12.5, padding: '6px 12px', opacity: findingId === msg.id ? 0.6 : 1 }}
+                    >
+                      {findingId === msg.id
+                        ? 'Reading…'
+                        : found === undefined
+                        ? 'Find tasks'
+                        : found === 0
+                        ? 'None found'
+                        : `Found ${found} ✓`}
+                    </button>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )}
       </div>
 
       <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 16, flexWrap: 'wrap' }}>
