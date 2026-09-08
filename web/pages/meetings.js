@@ -1,5 +1,4 @@
 import React, { useEffect, useState } from 'react'
-import Link from 'next/link'
 import { apiFetch } from '../lib/api'
 import Layout from '../components/Layout'
 import { PALETTE, cardStyle, primaryButtonStyle, secondaryButtonStyle, inputStyle } from '../lib/theme'
@@ -13,8 +12,10 @@ function formatEventTime(ev) {
 
 export default function MeetingsPage() {
   const [briefs, setBriefs] = useState([])
+
+  const [showEvents, setShowEvents] = useState(false)
   const [events, setEvents] = useState([])
-  const [loadingEvents, setLoadingEvents] = useState(true)
+  const [eventsLoaded, setEventsLoaded] = useState(false)
   const [requestingId, setRequestingId] = useState(null)
   const [queuedIds, setQueuedIds] = useState([])
 
@@ -26,18 +27,17 @@ export default function MeetingsPage() {
     apiFetch('/api/meetings/list').then(setBriefs).catch(() => setBriefs([]))
   }
 
-  const loadEvents = () => {
-    setLoadingEvents(true)
-    apiFetch('/mcp/calendar/get_events', { method: 'POST', body: JSON.stringify({ time_min: new Date().toISOString() }) })
-      .then((res) => setEvents(res.events || []))
-      .catch(() => setEvents([]))
-      .finally(() => setLoadingEvents(false))
-  }
+  useEffect(loadBriefs, [])
 
-  useEffect(() => {
-    loadBriefs()
-    loadEvents()
-  }, [])
+  const openEventPicker = () => {
+    setShowEvents(true)
+    if (!eventsLoaded) {
+      apiFetch('/mcp/calendar/get_events', { method: 'POST', body: JSON.stringify({ time_min: new Date().toISOString() }) })
+        .then((res) => setEvents(res.events || []))
+        .catch(() => setEvents([]))
+        .finally(() => setEventsLoaded(true))
+    }
+  }
 
   const generateFor = async (id) => {
     setRequestingId(id)
@@ -61,35 +61,45 @@ export default function MeetingsPage() {
   }
 
   return (
-    <Layout title="Meeting Briefs" subtitle="Pick an upcoming event below to generate a summary and talking points — no need to find an event ID.">
-      {loadingEvents && <div style={{ ...cardStyle, textAlign: 'center', color: PALETTE.muted, fontSize: 14 }}>Loading your calendar…</div>}
+    <Layout title="Meeting Briefs" subtitle="Generate a summary and talking points from a calendar event, plus any related email threads.">
+      <div style={{ ...cardStyle, marginBottom: 20 }}>
+        <button
+          onClick={() => (showEvents ? setShowEvents(false) : openEventPicker())}
+          style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left' }}
+        >
+          <span style={{ fontSize: 12, fontWeight: 700, color: PALETTE.accent, textTransform: 'uppercase', letterSpacing: '0.03em' }}>
+            {showEvents ? '▾' : '▸'} Pick from upcoming events
+          </span>
+        </button>
 
-      {!loadingEvents && events.length === 0 && (
-        <div style={{ ...cardStyle, textAlign: 'center', color: PALETTE.muted, fontSize: 14 }}>
-          No upcoming events found. Schedule one via{' '}
-          <Link href="/chat" style={{ color: PALETTE.accent, fontWeight: 600 }}>Chat</Link> first, then come back here.
-        </div>
-      )}
-
-      {events.length > 0 && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 24 }}>
-          {events.map((ev) => (
-            <div key={ev.id} style={{ ...cardStyle, padding: '14px 18px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-              <div>
-                <div style={{ fontWeight: 600, fontSize: 14.5 }}>{ev.summary || '(no title)'}</div>
-                <div style={{ color: PALETTE.muted, fontSize: 12.5, marginTop: 2 }}>{formatEventTime(ev)}</div>
-              </div>
-              <button
-                onClick={() => generateFor(ev.id)}
-                disabled={requestingId === ev.id || queuedIds.includes(ev.id)}
-                style={{ ...secondaryButtonStyle, flexShrink: 0, opacity: requestingId === ev.id ? 0.6 : 1 }}
-              >
-                {requestingId === ev.id ? 'Queuing…' : queuedIds.includes(ev.id) ? 'Queued ✓' : 'Generate brief'}
-              </button>
+        {showEvents && (
+          <div style={{ marginTop: 12 }}>
+            {!eventsLoaded && <p style={{ color: PALETTE.muted, fontSize: 13.5, margin: 0 }}>Loading your calendar…</p>}
+            {eventsLoaded && events.length === 0 && (
+              <p style={{ color: PALETTE.muted, fontSize: 13.5, margin: 0 }}>
+                No upcoming events found. Schedule one via Chat first, then come back here.
+              </p>
+            )}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {events.map((ev) => (
+                <div key={ev.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '8px 0', borderTop: `1px solid ${PALETTE.border}` }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 13.5, fontWeight: 600 }}>{ev.summary || '(no title)'}</div>
+                    <div style={{ color: PALETTE.muted, fontSize: 12 }}>{formatEventTime(ev)}</div>
+                  </div>
+                  <button
+                    onClick={() => generateFor(ev.id)}
+                    disabled={requestingId === ev.id || queuedIds.includes(ev.id)}
+                    style={{ ...secondaryButtonStyle, flexShrink: 0, fontSize: 12.5, padding: '6px 12px', opacity: requestingId === ev.id ? 0.6 : 1 }}
+                  >
+                    {requestingId === ev.id ? 'Queuing…' : queuedIds.includes(ev.id) ? 'Queued ✓' : 'Generate brief'}
+                  </button>
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
-      )}
+          </div>
+        )}
+      </div>
 
       <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
         <button onClick={loadBriefs} style={secondaryButtonStyle}>Refresh briefs</button>
