@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { apiFetch } from '../lib/api'
 import Layout from '../components/Layout'
-import { PALETTE, cardStyle, primaryButtonStyle, secondaryButtonStyle, inputStyle, statusPillStyle } from '../lib/theme'
+import { PALETTE, cardStyle, primaryButtonStyle, secondaryButtonStyle, dangerButtonStyle, inputStyle, statusPillStyle } from '../lib/theme'
 
 export default function Drafts() {
   const [drafts, setDrafts] = useState([])
@@ -34,6 +34,16 @@ export default function Drafts() {
     try {
       await apiFetch('/api/drafts/send', { method: 'POST', body: JSON.stringify({ draft_id: id }) })
       setDrafts((d) => d.map((x) => (x.id === id ? { ...x, status: 'queued' } : x)))
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  const reject = async (id) => {
+    setBusyId(id)
+    try {
+      await apiFetch('/api/drafts/reject', { method: 'POST', body: JSON.stringify({ draft_id: id }) })
+      setDrafts((d) => d.map((x) => (x.id === id ? { ...x, status: 'rejected' } : x)))
     } finally {
       setBusyId(null)
     }
@@ -169,8 +179,16 @@ export default function Drafts() {
                         Edit
                       </button>
                     )}
+                    {(d.status === 'pending' || d.status === 'approved') && (
+                      <button onClick={() => reject(d.id)} disabled={busyId === d.id} style={dangerButtonStyle}>
+                        Reject
+                      </button>
+                    )}
                     {(d.status === 'queued' || d.status === 'sent') && (
                       <span style={{ fontSize: 12.5, color: PALETTE.muted }}>On its way — no further action needed.</span>
+                    )}
+                    {d.status === 'rejected' && (
+                      <span style={{ fontSize: 12.5, color: PALETTE.muted }}>Dismissed — no longer active.</span>
                     )}
                   </>
                 )}

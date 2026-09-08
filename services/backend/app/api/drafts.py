@@ -274,6 +274,26 @@ def approve_draft(req: ActionRequest, user_id: int = Depends(get_current_user_id
         db.close()
 
 
+@router.post("/reject")
+def reject_draft(req: ActionRequest, user_id: int = Depends(get_current_user_id)):
+    """Dismiss a draft you don't want — the only way to get a draft out of
+    the pending/approval queue without sending it.
+    """
+    db = SessionLocal()
+    try:
+        draft = db.query(models.Draft).filter(models.Draft.id == req.draft_id, models.Draft.user_id == user_id).one_or_none()
+        if not draft:
+            raise HTTPException(status_code=404, detail="draft not found")
+        if draft.status in ("queued", "sent"):
+            raise HTTPException(status_code=400, detail=f"draft is already {draft.status}, can't reject it now")
+        draft.status = "rejected"
+        db.add(models.AuditLog(user_id=user_id, action="draft_rejected", meta=str({"draft_id": draft.id})))
+        db.commit()
+        return {"status": "rejected", "draft_id": draft.id}
+    finally:
+        db.close()
+
+
 @router.post("/send")
 def send_draft(req: ActionRequest, user_id: int = Depends(get_current_user_id)):
     db = SessionLocal()
